@@ -3,6 +3,7 @@ package pe.qorigo.suscripcion.infrastructure.rest;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 public record SuscripcionResponse(
         Long idSuscripcion,
@@ -20,6 +21,7 @@ public record SuscripcionResponse(
         BigDecimal costoPorPlaza,
         BigDecimal cobertura,
         boolean alertaDeficit,
-        Instant creadoEn
+        Instant creadoEn,
+        List<MiembroResponse> miembros
 ) {
 }

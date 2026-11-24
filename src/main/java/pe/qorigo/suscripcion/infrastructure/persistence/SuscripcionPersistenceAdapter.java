@@ -45,6 +45,13 @@ public class SuscripcionPersistenceAdapter implements SuscripcionRepository {
     }
 
     @Override
+    public Optional<Suscripcion> bloquearPorId(Long idSuscripcion) {
+        return Optional.ofNullable(em.find(SuscripcionEntity.class, idSuscripcion,
+                        jakarta.persistence.LockModeType.PESSIMISTIC_WRITE))
+                .map(mapper::aDominio);
+    }
+
+    @Override
     public Pagina<Suscripcion> buscar(FiltroSuscripciones filtro) {
         StringBuilder condiciones = new StringBuilder();
         if (filtro.texto() != null) {
