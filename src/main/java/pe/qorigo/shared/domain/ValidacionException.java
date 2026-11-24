@@ -19,6 +19,10 @@ public class ValidacionException extends NegocioException {
         this.detalles = detalles == null ? Map.of() : Map.copyOf(detalles);
     }
 
+    public static ValidacionException conCodigo(String codigo, String mensaje) {
+        return new ValidacionException(codigo, mensaje, Map.of());
+    }
+
     public Map<String, String> detalles() {
         return detalles;
     }
