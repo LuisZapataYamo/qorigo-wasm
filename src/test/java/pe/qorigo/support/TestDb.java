@@ -40,6 +40,13 @@ public class TestDb {
                 for (String tabla : TABLAS) {
                     statement.executeUpdate("DELETE FROM " + tabla);
                 }
+                statement.executeUpdate("DELETE FROM plataforma WHERE nombre NOT IN ('YouTube', 'Microsoft', 'Obsidian')");
+                statement.executeUpdate("UPDATE plataforma SET activo = TRUE WHERE nombre IN ('YouTube', 'Microsoft', 'Obsidian')");
+                statement.executeUpdate("DELETE FROM configuracion");
+                statement.executeUpdate("INSERT INTO configuracion (clave, valor) VALUES ('umbral_riesgo_dias', '30')");
+                statement.executeUpdate("INSERT INTO configuracion (clave, valor) VALUES ('imagen_ancho', '100')");
+                statement.executeUpdate("INSERT INTO configuracion (clave, valor) VALUES ('imagen_alto', '100')");
+                statement.executeUpdate("INSERT INTO configuracion (clave, valor) VALUES ('metodos_con_comprobante', 'YAPE,PLIN,TRANSFERENCIA')");
             }
             idAdmin = insertarAdmin(connection);
         } catch (SQLException e) {
