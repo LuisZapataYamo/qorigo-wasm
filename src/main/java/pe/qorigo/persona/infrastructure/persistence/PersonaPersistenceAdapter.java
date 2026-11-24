@@ -6,6 +6,7 @@ import jakarta.persistence.EntityManager;
 import pe.qorigo.persona.application.PersonaRepository;
 import pe.qorigo.persona.domain.Persona;
 
+import java.util.List;
 import java.util.Optional;
 
 @ApplicationScoped
@@ -32,6 +33,22 @@ public class PersonaPersistenceAdapter implements PersonaRepository {
                 .getResultStream()
                 .findFirst()
                 .map(mapper::aDominio);
+    }
+
+    @Override
+    public List<Persona> buscarSimilares(String nombreNormalizado) {
+        if (nombreNormalizado == null || nombreNormalizado.isBlank()) {
+            return List.of();
+        }
+        return mapper.aDominio(em.createQuery(
+                        "select p from PersonaEntity p " +
+                                "where p.nombreNormalizado = :nombre " +
+                                "or p.nombreNormalizado like concat('%', :nombre, '%') " +
+                                "or :nombre like concat('%', p.nombreNormalizado, '%')",
+                        PersonaEntity.class)
+                .setParameter("nombre", nombreNormalizado)
+                .setMaxResults(10)
+                .getResultList());
     }
 
     @Override

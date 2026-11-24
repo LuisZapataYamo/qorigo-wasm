@@ -11,7 +11,7 @@ public class ConflictoExceptionMapper implements ExceptionMapper<ConflictoExcept
     @Override
     public Response toResponse(ConflictoException exception) {
         return Response.status(Response.Status.CONFLICT)
-                .entity(ApiError.de(exception.codigo(), exception.getMessage()))
+                .entity(ApiError.de(exception.codigo(), exception.getMessage(), exception.detalles()))
                 .build();
     }
 }
