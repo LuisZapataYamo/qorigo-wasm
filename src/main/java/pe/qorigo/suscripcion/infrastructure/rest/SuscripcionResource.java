@@ -19,11 +19,16 @@ import pe.qorigo.shared.application.Pagina;
 import pe.qorigo.shared.infrastructure.rest.PaginaResponse;
 import pe.qorigo.suscripcion.application.ActualizarSuscripcionCommand;
 import pe.qorigo.suscripcion.application.ActualizarSuscripcionUseCase;
+import pe.qorigo.suscripcion.application.AgregarMiembroUseCase;
 import pe.qorigo.suscripcion.application.CrearSuscripcionCommand;
 import pe.qorigo.suscripcion.application.CrearSuscripcionUseCase;
+import pe.qorigo.suscripcion.application.ListarMiembrosUseCase;
 import pe.qorigo.suscripcion.application.ListarSuscripcionesUseCase;
+import pe.qorigo.suscripcion.application.MiembroDetalle;
 import pe.qorigo.suscripcion.application.ObtenerSuscripcionUseCase;
 import pe.qorigo.suscripcion.application.SuscripcionDetalle;
+
+import java.util.List;
 
 @Path("/suscripciones")
 @Produces(MediaType.APPLICATION_JSON)
@@ -43,6 +48,12 @@ public class SuscripcionResource {
 
     @Inject
     ActualizarSuscripcionUseCase actualizar;
+
+    @Inject
+    AgregarMiembroUseCase agregarMiembro;
+
+    @Inject
+    ListarMiembrosUseCase listarMiembros;
 
     @Inject
     SuscripcionRestMapper mapper;
@@ -77,7 +88,8 @@ public class SuscripcionResource {
     @GET
     @Path("/{id}")
     public SuscripcionResponse obtener(@PathParam("id") Long id) {
-        return mapper.aResponse(obtener.ejecutar(id));
+        SuscripcionDetalle detalle = obtener.ejecutar(id);
+        return mapper.aResponse(detalle, listarMiembros.ejecutar(id));
     }
 
     @PATCH
@@ -90,5 +102,16 @@ public class SuscripcionResource {
                 request.diaCobro(),
                 request.estado()));
         return mapper.aResponse(detalle);
+    }
+
+    @POST
+    @Path("/{id}/miembros")
+    public Response agregarMiembro(@PathParam("id") Long id, @Valid AgregarMiembroRequest request) {
+        MiembroDetalle miembro = agregarMiembro.ejecutar(id, mapper.aCommand(request));
+        SuscripcionDetalle detalle = obtener.ejecutar(id);
+        List<MiembroDetalle> miembros = listarMiembros.ejecutar(id);
+        return Response.status(Response.Status.CREATED)
+                .entity(new MiembroCreadoResponse(mapper.aResponse(miembro), mapper.aResponse(detalle, miembros)))
+                .build();
     }
 }

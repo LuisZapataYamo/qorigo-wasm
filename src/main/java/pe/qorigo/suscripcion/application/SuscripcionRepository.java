@@ -13,6 +13,12 @@ public interface SuscripcionRepository {
 
     Optional<Suscripcion> buscarPorId(Long idSuscripcion);
 
+    /**
+     * Bloquea la fila de la suscripción hasta el fin de la transacción. Se usa
+     * para validar la capacidad de forma segura ante altas concurrentes.
+     */
+    Optional<Suscripcion> bloquearPorId(Long idSuscripcion);
+
     Pagina<Suscripcion> buscar(FiltroSuscripciones filtro);
 
     ResumenMiembros resumenMiembros(Long idSuscripcion);
