@@ -24,6 +24,16 @@ public class JaxrsExceptionMapper implements ExceptionMapper<RuntimeException> {
                     .entity(ApiError.de("SOLICITUD_INVALIDA", "Solicitud inválida"))
                     .build();
         }
+        if (exception instanceof jakarta.ws.rs.NotAuthorizedException) {
+            return Response.status(Response.Status.UNAUTHORIZED)
+                    .entity(ApiError.de("NO_AUTORIZADO", "Credenciales inválidas o sesión expirada"))
+                    .build();
+        }
+        if (exception instanceof jakarta.ws.rs.ForbiddenException) {
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity(ApiError.de("PROHIBIDO", "No tienes permiso para esta operación"))
+                    .build();
+        }
         LOG.error("Error no controlado", exception);
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                 .entity(ApiError.de("ERROR_INTERNO", "Ocurrió un error inesperado"))
