@@ -22,6 +22,16 @@ export function Disposicion() {
     setMenuAbierto(false);
   }, [ubicacion.pathname]);
 
+  // Escape cierra el menú desplegable.
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const alPresionar = (evento: KeyboardEvent) => {
+      if (evento.key === 'Escape') setMenuAbierto(false);
+    };
+    window.addEventListener('keydown', alPresionar);
+    return () => window.removeEventListener('keydown', alPresionar);
+  }, [menuAbierto]);
+
   return (
     <div className="disposicion">
       <header className="cabecera">
