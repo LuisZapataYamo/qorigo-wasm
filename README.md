@@ -52,6 +52,20 @@ src/
 - La importación no crea sincronización: cada instalación sigue siendo
   independiente hasta el siguiente intercambio manual.
 
+## Recordatorios de pago
+
+En **Configuración → Recordatorios de pago** puedes activar avisos para:
+
+- cargos de suscripción dentro de la ventana de anticipación,
+- cuotas de préstamo próximas o vencidas,
+- el día de facturación de una suscripción cuyo periodo aún no tiene cargos.
+
+Los avisos se calculan con IndexedDB y **funcionan sin internet**. El navegador
+los revisa al abrir la app, cada 15 minutos mientras está abierta y al volver a
+la pestaña. No hay servidor push: si la aplicación está cerrada, el navegador
+**no garantiza** el aviso. Funciona tanto en Android como en computadora,
+siempre que se conceda el permiso de notificaciones.
+
 ## Documentación
 
 El plan funcional completo está en [`docs/plan_v2.md`](docs/plan_v2.md).

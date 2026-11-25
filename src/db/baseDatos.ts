@@ -14,6 +14,7 @@ import type {
   Persona,
   Plataforma,
   Prestamo,
+  RecordatorioEnviado,
   SesionRegistro,
   Suscripcion,
   Usuario,
@@ -37,6 +38,7 @@ export class BaseDatos extends Dexie {
   auditoria!: Table<AuditoriaRegistro, string>;
   configuracion!: Table<Configuracion, string>;
   sesion!: Table<SesionRegistro, string>;
+  recordatorios!: Table<RecordatorioEnviado, string>;
 
   constructor(nombre = 'qorigo') {
     super(nombre);
@@ -60,6 +62,10 @@ export class BaseDatos extends Dexie {
       auditoria: 'id, entidad, entidadId, creadoEn',
       configuracion: 'clave',
       sesion: 'clave',
+    });
+    // v2: historial de recordatorios ya mostrados.
+    this.version(2).stores({
+      recordatorios: 'clave, entidadId, enviadoEn',
     });
   }
 }

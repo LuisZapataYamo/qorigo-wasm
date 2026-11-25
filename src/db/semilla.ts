@@ -16,6 +16,8 @@ export const CONFIGURACION_INICIAL: Record<string, string> = {
   metodos_con_comprobante: 'YAPE,PLIN,TRANSFERENCIA',
   moneda_por_defecto: 'PEN',
   version_esquema: '1',
+  notificaciones_activas: 'NO',
+  recordatorios_dias: '3',
 };
 
 /** Carga catálogos y configuración una sola vez. Es idempotente. */

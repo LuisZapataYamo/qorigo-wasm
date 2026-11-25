@@ -186,6 +186,15 @@ export interface SesionRegistro {
   valor: string;
 }
 
+/** Marca de un recordatorio ya mostrado para no repetirlo. */
+export interface RecordatorioEnviado {
+  clave: string;
+  tipo: TipoObligacion | 'FACTURACION';
+  entidadId: string;
+  fechaVencimiento: string;
+  enviadoEn: string;
+}
+
 /** Saldos calculados de un cargo o cuota. */
 export interface ObligacionPendiente {
   tipo: TipoObligacion;
