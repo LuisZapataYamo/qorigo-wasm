@@ -213,3 +213,153 @@ export async function coberturaActual(
   const detalle = await detalleSuscripcion(db, suscripcionId);
   return detalle.coberturaCentimos;
 }
+
+/* ------------------------------- CU-05 ------------------------------- */
+
+export interface CambiosMiembro {
+  montoAcordado?: number | string;
+  esPlazaPropia?: boolean;
+}
+
+export async function obtenerMiembro(
+  db: BaseDatos,
+  miembroId: string,
+): Promise<MiembroSuscripcion> {
+  const miembro = await db.miembrosSuscripcion.get(miembroId);
+  if (!miembro) throw new ErrorNoEncontrado('La membresía no existe.');
+  return miembro;
+}
+
+/**
+ * Cambia el monto individual. Los cargos ya generados no se alteran: el nuevo
+ * monto rige desde el siguiente periodo que se genere (RN-S06).
+ */
+export async function actualizarMiembro(
+  db: BaseDatos,
+  miembroId: string,
+  cambios: CambiosMiembro,
+): Promise<MiembroSuscripcion> {
+  const anterior = await obtenerMiembro(db, miembroId);
+  const esPlazaPropia =
+    cambios.esPlazaPropia !== undefined
+      ? cambios.esPlazaPropia
+      : anterior.esPlazaPropia;
+
+  const montoSolicitado =
+    cambios.montoAcordado !== undefined
+      ? aCentimos(cambios.montoAcordado)
+      : anterior.montoAcordadoCentimos;
+  if (montoSolicitado < 0) {
+    throw new ErrorValidacion(
+      'El monto acordado no puede ser negativo.',
+      'montoAcordado',
+    );
+  }
+  if (esPlazaPropia && montoSolicitado !== 0) {
+    throw new ErrorValidacion(
+      'La plaza propia no genera cargos: el monto debe ser 0.',
+      'montoAcordado',
+    );
+  }
+
+  const actualizado: MiembroSuscripcion = {
+    ...anterior,
+    montoAcordadoCentimos: esPlazaPropia ? 0 : montoSolicitado,
+    esPlazaPropia,
+  };
+
+  await db.transaction(
+    'rw',
+    db.miembrosSuscripcion,
+    db.auditoria,
+    async () => {
+      await db.miembrosSuscripcion.put(actualizado);
+      await auditar(db, {
+        entidad: 'MIEMBRO_SUSCRIPCION',
+        entidadId: miembroId,
+        accion: 'ACTUALIZAR',
+        antes: anterior,
+        despues: actualizado,
+      });
+    },
+  );
+
+  return actualizado;
+}
+
+/**
+ * Baja lógica. Los cargos pendientes se conservan y no se generan nuevos
+ * cargos desde el periodo siguiente a la fecha de fin (RN-S08).
+ */
+export async function darDeBajaMiembro(
+  db: BaseDatos,
+  miembroId: string,
+  fechaFin: string,
+): Promise<MiembroSuscripcion> {
+  const anterior = await obtenerMiembro(db, miembroId);
+  if (!esFechaValida(fechaFin)) {
+    throw new ErrorValidacion('La fecha de baja no es válida.', 'fechaFin');
+  }
+  if (fechaFin < anterior.fechaInicio) {
+    throw new ErrorValidacion(
+      'La fecha de baja no puede ser anterior al inicio de la membresía.',
+      'fechaFin',
+    );
+  }
+  if (anterior.estado === 'INACTIVO') {
+    return anterior;
+  }
+
+  const actualizado: MiembroSuscripcion = {
+    ...anterior,
+    estado: 'INACTIVO',
+    fechaFin,
+  };
+
+  await db.transaction(
+    'rw',
+    db.miembrosSuscripcion,
+    db.auditoria,
+    async () => {
+      await db.miembrosSuscripcion.put(actualizado);
+      await auditar(db, {
+        entidad: 'MIEMBRO_SUSCRIPCION',
+        entidadId: miembroId,
+        accion: 'DAR_DE_BAJA',
+        antes: anterior,
+        despues: actualizado,
+      });
+    },
+  );
+
+  return actualizado;
+}
+
+export async function reactivarMiembro(
+  db: BaseDatos,
+  miembroId: string,
+): Promise<MiembroSuscripcion> {
+  const anterior = await obtenerMiembro(db, miembroId);
+  if (anterior.estado === 'ACTIVO') return anterior;
+  const actualizado: MiembroSuscripcion = {
+    ...anterior,
+    estado: 'ACTIVO',
+    fechaFin: undefined,
+  };
+  await db.transaction(
+    'rw',
+    db.miembrosSuscripcion,
+    db.auditoria,
+    async () => {
+      await db.miembrosSuscripcion.put(actualizado);
+      await auditar(db, {
+        entidad: 'MIEMBRO_SUSCRIPCION',
+        entidadId: miembroId,
+        accion: 'REACTIVAR',
+        antes: anterior,
+        despues: actualizado,
+      });
+    },
+  );
+  return actualizado;
+}
