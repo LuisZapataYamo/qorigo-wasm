@@ -4,8 +4,10 @@ import { db } from '../../db/baseDatos';
 import {
   anularPago,
   listarPagos,
+  obtenerComprobantes,
   obtenerObligacionesPendientes,
   registrarPago,
+  type FiltroPagos,
 } from '../../aplicacion/pagos';
 import {
   procesarComprobante,
@@ -14,8 +16,11 @@ import {
 import { aCentimos, aSoles, formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy } from '../../dominio/fechas';
 import { ErrorConflicto, mensajeDeError } from '../../dominio/errores';import { nombreCompleto } from '../../dominio/nombres';
-import type { ObligacionPendiente, TipoObligacion } from '../../db/tipos';
-import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
+import type {
+  ComprobantePago,
+  ObligacionPendiente,
+  TipoObligacion,
+} from '../../db/tipos';import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
 
 export function Pagos() {
   const [personaId, setPersonaId] = useState('');
@@ -32,6 +37,18 @@ export function Pagos() {
   const [refresco, setRefresco] = useState(0);
   const [comprobantes, setComprobantes] = useState<ComprobanteProcesado[]>([]);
   const [procesandoImagen, setProcesandoImagen] = useState(false);
+  const [filtros, setFiltros] = useState({
+    personaId: '',
+    tipo: '',
+    metodoPago: '',
+    desde: '',
+    hasta: '',
+    estado: '',
+  });
+  const [comprobantesVista, setComprobantesVista] = useState<
+    ComprobantePago[]
+  >([]);
+  const [vistaPago, setVistaPago] = useState<string | null>(null);
 
   const personas = useLiveQuery(
     () =>
@@ -61,10 +78,32 @@ export function Pagos() {
   );
 
   const pagos = useLiveQuery(
-    () => listarPagos(db),
-    [refresco],
+    () => {
+      const filtro: FiltroPagos = {
+        personaId: filtros.personaId || undefined,
+        tipo: (filtros.tipo || undefined) as TipoObligacion | undefined,
+        metodoPago: filtros.metodoPago || undefined,
+        desde: filtros.desde || undefined,
+        hasta: filtros.hasta || undefined,
+        estado:
+          filtros.estado === 'REGISTRADO' || filtros.estado === 'ANULADO'
+            ? filtros.estado
+            : undefined,
+      };
+      return listarPagos(db, filtro);
+    },
+    [filtros, refresco],
     [],
   );
+
+  const conteoComprobantes = useLiveQuery(async () => {
+    const lista = await db.comprobantesPago.toArray();
+    const mapa = new Map<string, number>();
+    for (const comprobante of lista) {
+      mapa.set(comprobante.pagoId, (mapa.get(comprobante.pagoId) ?? 0) + 1);
+    }
+    return mapa;
+  }, [refresco]);
 
   const metodos = useLiveQuery(
     () =>
@@ -196,6 +235,11 @@ export function Pagos() {
     } catch (fallo) {
       setError(mensajeDeError(fallo));
     }
+  }
+
+  async function verComprobantes(pagoId: string) {
+    setVistaPago(pagoId);
+    setComprobantesVista(await obtenerComprobantes(db, pagoId));
   }
 
   return (
@@ -447,6 +491,97 @@ export function Pagos() {
           <h2>Pagos registrados</h2>
           <span className="nota">{pagos?.length ?? 0} pago(s)</span>
         </div>
+
+        <div className="fila-filtros">
+          <Campo etiqueta="Persona">
+            <select
+              value={filtros.personaId}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, personaId: e.target.value }))
+              }
+            >
+              <option value="">Todas</option>
+              {(personas ?? []).map((persona) => (
+                <option key={persona.id} value={persona.id}>
+                  {nombreCompleto(persona.apellidos, persona.nombres)}
+                </option>
+              ))}
+            </select>
+          </Campo>
+          <Campo etiqueta="Tipo">
+            <select
+              value={filtros.tipo}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, tipo: e.target.value }))
+              }
+            >
+              <option value="">Todos</option>
+              <option value="SUSCRIPCION">Suscripción</option>
+              <option value="PRESTAMO">Préstamo</option>
+            </select>
+          </Campo>
+          <Campo etiqueta="Método">
+            <select
+              value={filtros.metodoPago}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, metodoPago: e.target.value }))
+              }
+            >
+              <option value="">Todos</option>
+              {listaMetodos.map((metodo) => (
+                <option key={metodo} value={metodo}>
+                  {metodo}
+                </option>
+              ))}
+            </select>
+          </Campo>
+          <Campo etiqueta="Desde">
+            <input
+              type="date"
+              value={filtros.desde}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, desde: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo etiqueta="Hasta">
+            <input
+              type="date"
+              value={filtros.hasta}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, hasta: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo etiqueta="Estado">
+            <select
+              value={filtros.estado}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, estado: e.target.value }))
+              }
+            >
+              <option value="">Todos</option>
+              <option value="REGISTRADO">Registrado</option>
+              <option value="ANULADO">Anulado</option>
+            </select>
+          </Campo>
+          <button
+            className="boton boton-secundario boton-pequeno"
+            type="button"
+            onClick={() =>
+              setFiltros({
+                personaId: '',
+                tipo: '',
+                metodoPago: '',
+                desde: '',
+                hasta: '',
+                estado: '',
+              })
+            }
+          >
+            Limpiar
+          </button>
+        </div>
         {(pagos ?? []).length === 0 ? (
           <Vacio>Aún no hay pagos registrados.</Vacio>
         ) : (
@@ -489,19 +624,30 @@ export function Pagos() {
                         </Etiqueta>
                       </td>
                       <td>
-                        {pago.estado === 'REGISTRADO' ? (
-                          <button
-                            className="boton boton-peligro boton-pequeno"
-                            type="button"
-                            onClick={() => void anular(pago.id)}
-                          >
-                            Anular
-                          </button>
-                        ) : (
-                          <span className="nota">
-                            {pago.motivoAnulacion ?? '—'}
-                          </span>
-                        )}
+                        <div className="grilla-inline">
+                          {(conteoComprobantes?.get(pago.id) ?? 0) > 0 ? (
+                            <button
+                              className="boton boton-secundario boton-pequeno"
+                              type="button"
+                              onClick={() => void verComprobantes(pago.id)}
+                            >
+                              Comprobante
+                            </button>
+                          ) : null}
+                          {pago.estado === 'REGISTRADO' ? (
+                            <button
+                              className="boton boton-peligro boton-pequeno"
+                              type="button"
+                              onClick={() => void anular(pago.id)}
+                            >
+                              Anular
+                            </button>
+                          ) : (
+                            <span className="nota">
+                              {pago.motivoAnulacion ?? '—'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -511,6 +657,57 @@ export function Pagos() {
           </div>
         )}
       </article>
+
+      {vistaPago ? (
+        <article className="tarjeta">
+          <div className="encabezado-tarjeta">
+            <h2>Comprobantes del pago</h2>
+            <button
+              className="boton boton-secundario boton-pequeno"
+              type="button"
+              onClick={() => {
+                setVistaPago(null);
+                setComprobantesVista([]);
+              }}
+            >
+              Cerrar
+            </button>
+          </div>
+          <Aviso tipo="alerta">
+            Son miniaturas de 100×100 px: sirven como evidencia, no como
+            comprobante legible. El número de operación está en la tabla.
+          </Aviso>
+          {comprobantesVista.length === 0 ? (
+            <Vacio>Este pago no tiene comprobantes.</Vacio>
+          ) : (
+            <div
+              className="acciones"
+              style={{ marginTop: '0.8rem', alignItems: 'flex-start' }}
+            >
+              {comprobantesVista.map((comprobante) => (
+                <figure key={comprobante.id} style={{ margin: 0 }}>
+                  <img
+                    src={URL.createObjectURL(comprobante.imagen)}
+                    alt="Comprobante ampliado"
+                    width={200}
+                    height={200}
+                    style={{
+                      imageRendering: 'pixelated',
+                      border: '1px solid #e7e5e4',
+                      borderRadius: 10,
+                      background: '#fff',
+                    }}
+                  />
+                  <figcaption className="nota">
+                    {comprobante.ancho}×{comprobante.alto} ·{' '}
+                    {comprobante.sha256.slice(0, 12)}…
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+        </article>
+      ) : null}
     </section>
   );
 }
