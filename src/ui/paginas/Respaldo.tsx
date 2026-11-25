@@ -7,6 +7,11 @@ import {
   nombreArchivoExportacion,
   serializarPaquete,
 } from '../../aplicacion/respaldo';
+import {
+  importarDatos,
+  previsualizarImportacion,
+  type PrevisualizacionImportacion,
+} from '../../aplicacion/importacion';
 import { mensajeDeError } from '../../dominio/errores';
 import { Aviso } from '../componentes';
 
@@ -24,6 +29,16 @@ export function Respaldo() {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
+  const [paqueteImportado, setPaqueteImportado] = useState<unknown>(null);
+  const [preview, setPreview] = useState<PrevisualizacionImportacion | null>(
+    null,
+  );
+  const [modo, setModo] = useState<'REEMPLAZAR' | 'COMBINAR'>('COMBINAR');
+  const [importando, setImportando] = useState(false);
+  const [mensajeImportacion, setMensajeImportacion] = useState<string | null>(
+    null,
+  );
+  const [errorImportacion, setErrorImportacion] = useState<string | null>(null);
 
   const conteos = useLiveQuery(async () => {
     const [
@@ -68,6 +83,62 @@ export function Respaldo() {
       setError(mensajeDeError(fallo));
     } finally {
       setExportando(false);
+    }
+  }
+
+  async function seleccionarArchivo(archivo: File | null) {
+    setPreview(null);
+    setPaqueteImportado(null);
+    setMensajeImportacion(null);
+    setErrorImportacion(null);
+    if (!archivo) return;
+    try {
+      const texto = await archivo.text();
+      const datos = JSON.parse(texto) as unknown;
+      const vista = previsualizarImportacion(datos);
+      setPreview(vista);
+      setPaqueteImportado(datos);
+      if (!vista.valido) {
+        setErrorImportacion(
+          'El archivo no es válido. Revisa los errores antes de continuar.',
+        );
+      }
+    } catch {
+      setErrorImportacion('El archivo no contiene JSON válido.');
+    }
+  }
+
+  async function importar() {
+    if (!paqueteImportado || !preview?.valido) return;
+    if (
+      modo === 'REEMPLAZAR' &&
+      !window.confirm(
+        'Se reemplazarán todos los datos de negocio de este dispositivo. Se recomienda exportar una copia antes. ¿Continuar?',
+      )
+    ) {
+      return;
+    }
+    setImportando(true);
+    setErrorImportacion(null);
+    setMensajeImportacion(null);
+    try {
+      const resultado = await importarDatos(db, paqueteImportado, { modo });
+      const totalImportado = Object.values(resultado.importados).reduce(
+        (a, b) => a + b,
+        0,
+      );
+      const totalOmitido = Object.values(resultado.omitidos).reduce(
+        (a, b) => a + b,
+        0,
+      );
+      setMensajeImportacion(
+        `Importación ${modo.toLowerCase()} completada: ${totalImportado} registro(s) importado(s)` +
+          (totalOmitido > 0 ? `, ${totalOmitido} ya existente(s) omitido(s).` : '.'),
+      );
+    } catch (fallo) {
+      setErrorImportacion(mensajeDeError(fallo));
+    } finally {
+      setImportando(false);
     }
   }
 
@@ -142,6 +213,106 @@ export function Respaldo() {
           incluye contraseñas, sesiones ni la configuración de acceso local,
           que pertenecen a este dispositivo.
         </p>
+      </article>
+
+      <article className="tarjeta">
+        <h2>Importar</h2>
+        <p className="nota">
+          Selecciona un JSON exportado desde QoriGo. Se valida antes de escribir:
+          nada cambia hasta que confirmes.
+        </p>
+        <div className="campo">
+          <span>Archivo JSON</span>
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => {
+              void seleccionarArchivo(e.target.files?.[0] ?? null);
+              e.target.value = '';
+            }}
+          />
+        </div>
+
+        {preview ? (
+          <div style={{ marginTop: '0.9rem' }}>
+            <Aviso tipo={preview.valido ? 'exito' : 'error'}>
+              <div>
+                <strong>
+                  {preview.valido
+                    ? 'Paquete válido'
+                    : 'Paquete inválido'}
+                </strong>
+                <p style={{ margin: '0.25rem 0' }}>
+                  Formato {preview.formato ?? '—'} · versión{' '}
+                  {preview.formatVersion ?? '—'} · exportado{' '}
+                  {preview.exportedAt
+                    ? new Date(preview.exportedAt).toLocaleString('es-PE')
+                    : '—'}
+                </p>
+                <p style={{ margin: '0.25rem 0' }}>
+                  {preview.conteos.personas ?? 0} personas ·{' '}
+                  {preview.conteos.suscripciones ?? 0} suscripciones ·{' '}
+                  {preview.conteos.prestamos ?? 0} préstamos ·{' '}
+                  {preview.conteos.pagos ?? 0} pagos ·{' '}
+                  {preview.conteos.comprobantes ?? 0} comprobantes
+                </p>
+                {preview.errores.length > 0 ? (
+                  <ul style={{ margin: '0.3rem 0 0', paddingLeft: '1.1rem' }}>
+                    {preview.errores.slice(0, 8).map((mensajeError) => (
+                      <li key={mensajeError}>{mensajeError}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {preview.advertencias.length > 0 ? (
+                  <ul style={{ margin: '0.3rem 0 0', paddingLeft: '1.1rem' }}>
+                    {preview.advertencias.map((advertencia) => (
+                      <li key={advertencia}>{advertencia}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </Aviso>
+
+            <div className="fila-filtros" style={{ marginTop: '0.8rem' }}>
+              <label className="campo">
+                <span>Modo</span>
+                <select
+                  value={modo}
+                  onChange={(e) =>
+                    setModo(e.target.value as 'REEMPLAZAR' | 'COMBINAR')
+                  }
+                >
+                  <option value="COMBINAR">Combinar datos</option>
+                  <option value="REEMPLAZAR">Reemplazar datos locales</option>
+                </select>
+              </label>
+              <button
+                className="boton boton-primario"
+                type="button"
+                disabled={!preview.valido || importando}
+                onClick={() => void importar()}
+              >
+                {importando ? 'Importando…' : 'Importar datos'}
+              </button>
+            </div>
+            <p className="nota">
+              Combinar incorpora solo UUID nuevos. Si un UUID existe con otro
+              contenido, la importación se cancela sin sobrescribir. Reemplazar
+              sustituye todo el conjunto de datos de negocio.
+            </p>
+          </div>
+        ) : null}
+
+        {errorImportacion ? (
+          <div style={{ marginTop: '0.7rem' }}>
+            <Aviso tipo="error">{errorImportacion}</Aviso>
+          </div>
+        ) : null}
+        {mensajeImportacion ? (
+          <div style={{ marginTop: '0.7rem' }}>
+            <Aviso tipo="exito">{mensajeImportacion}</Aviso>
+          </div>
+        ) : null}
       </article>
     </section>
   );
