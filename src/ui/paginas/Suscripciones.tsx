@@ -18,7 +18,8 @@ import {
 } from '../../aplicacion/miembros';
 import { mensajeDeError } from '../../dominio/errores';
 import { formatearMoneda } from '../../dominio/dinero';
-import { formatearFecha, hoy } from '../../dominio/fechas';
+import { formatearFecha, hoy, periodoActual } from '../../dominio/fechas';
+import { generarPeriodo, type ResultadoGeneracion } from '../../aplicacion/cargos';
 import { nombreCompleto } from '../../dominio/nombres';
 import type { Persona, Suscripcion } from '../../db/tipos';
 import { Aviso, Cargando, Campo, Etiqueta, Vacio, colorEstadoSuscripcion } from '../componentes';
@@ -65,6 +66,11 @@ export function Suscripciones() {
     fechaFin: string;
     estado: string;
   } | null>(null);
+  const [periodoGen, setPeriodoGen] = useState(periodoActual().slice(0, 7));
+  const [resultadoGen, setResultadoGen] = useState<ResultadoGeneracion | null>(
+    null,
+  );
+  const [errorGen, setErrorGen] = useState<string | null>(null);
 
   const plataformas = useLiveQuery(
     () => db.plataformas.toArray().then((p) => p.filter((x) => x.activo)),
@@ -294,6 +300,18 @@ export function Suscripciones() {
     }
   }
 
+  async function generar() {
+    setErrorGen(null);
+    setResultadoGen(null);
+    try {
+      const resultado = await generarPeriodo(db, `${periodoGen}-01`);
+      setResultadoGen(resultado);
+      if (detalle) await refrescarDetalle();
+    } catch (fallo) {
+      setErrorGen(mensajeDeError(fallo));
+    }
+  }
+
   return (
     <section className="pagina">
       <div className="pagina-encabezado">
@@ -402,6 +420,63 @@ export function Suscripciones() {
             </div>
           ) : null}
         </form>
+      </article>
+
+      <article className="tarjeta">
+        <h2>Generar cargos del periodo</h2>
+        <p className="nota">
+          Crea el costo del servicio y el cargo de cada miembro activo. Es
+          idempotente: repetir el mismo periodo no duplica registros.
+        </p>
+        <form
+          className="formulario"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void generar();
+          }}
+        >
+          <Campo etiqueta="Periodo">
+            <input
+              type="month"
+              value={periodoGen}
+              onChange={(e) => setPeriodoGen(e.target.value)}
+            />
+          </Campo>
+          <div className="acciones">
+            <button className="boton boton-primario" type="submit">
+              Generar periodo
+            </button>
+          </div>
+        </form>
+        {errorGen ? (
+          <div style={{ marginTop: '0.8rem' }}>
+            <Aviso tipo="error">{errorGen}</Aviso>
+          </div>
+        ) : null}
+        {resultadoGen ? (
+          <div style={{ marginTop: '0.8rem' }}>
+            <Aviso
+              tipo={resultadoGen.errores.length > 0 ? 'alerta' : 'exito'}
+            >
+              <div>
+                <p style={{ margin: 0 }}>
+                  Periodo {resultadoGen.periodo.slice(0, 7)}: {resultadoGen.procesadas}{' '}
+                  suscripción(es) procesada(s), {resultadoGen.costosCreados}{' '}
+                  costo(s) y {resultadoGen.cargosCreados} cargo(s) creados.
+                </p>
+                {resultadoGen.errores.length > 0 ? (
+                  <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem' }}>
+                    {resultadoGen.errores.map((fallo) => (
+                      <li key={fallo.suscripcionId}>
+                        {fallo.nombre}: {fallo.mensaje}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </Aviso>
+          </div>
+        ) : null}
       </article>
 
       {editando ? (
