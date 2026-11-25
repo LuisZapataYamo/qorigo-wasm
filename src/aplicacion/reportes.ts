@@ -852,3 +852,214 @@ export function prestamosACsv(lineas: LineaPrestamo[]): string {
     })),
   );
 }
+
+/* ------------------------------- CU-20 ------------------------------- */
+
+export interface LineaRentabilidad {
+  tipo: 'SUSCRIPCION' | 'PRESTAMO' | 'PERSONA';
+  id: string;
+  nombre: string;
+  margenSuscripcionesCentimos: number;
+  interesCobradoCentimos: number;
+  perdidasCentimos: number;
+  resultadoCentimos: number;
+}
+
+export interface InformeRentabilidad {
+  periodo: string;
+  moneda: string;
+  margenSuscripcionesCentimos: number;
+  interesCobradoCentimos: number;
+  perdidasIncobrablesCentimos: number;
+  resultadoCentimos: number;
+  costosCentimos: number;
+  capitalEnLaCalleCentimos: number;
+  rentabilidadPorcentaje: number;
+  porSuscripcion: LineaRentabilidad[];
+  porPrestamo: LineaRentabilidad[];
+  porPersona: LineaRentabilidad[];
+}
+
+export async function rentabilidad(
+  db: BaseDatos,
+  periodo: string = periodoActual(),
+  moneda = 'PEN',
+): Promise<InformeRentabilidad> {
+  const ctx = await cargarContexto(db);
+  const balance = calcularBalance(ctx, periodo, moneda);
+  const fin = finDeMes(periodo);
+  const aplicaciones = aplicacionesEnPeriodo(ctx, periodo, moneda);
+
+  const cobradoPorSuscripcion = new Map<string, number>();
+  const interesPorPrestamo = new Map<string, number>();
+  const aportePorPersona = new Map<string, number>();
+  const interesPorPersona = new Map<string, number>();
+
+  for (const aplicacion of aplicaciones) {
+    if (aplicacion.cargoId) {
+      const cargo = ctx.mapaCargos.get(aplicacion.cargoId);
+      const miembro = cargo ? ctx.mapaMiembros.get(cargo.miembroId) : undefined;
+      if (!miembro) continue;
+      cobradoPorSuscripcion.set(
+        miembro.suscripcionId,
+        (cobradoPorSuscripcion.get(miembro.suscripcionId) ?? 0) +
+          aplicacion.montoAplicadoCentimos,
+      );
+      aportePorPersona.set(
+        miembro.personaId,
+        (aportePorPersona.get(miembro.personaId) ?? 0) +
+          aplicacion.montoAplicadoCentimos,
+      );
+    }
+    if (aplicacion.cuotaId) {
+      const cuota = ctx.mapaCuotas.get(aplicacion.cuotaId);
+      const prestamo = cuota
+        ? ctx.mapaPrestamos.get(cuota.prestamoId)
+        : undefined;
+      if (!prestamo) continue;
+      const interes = aplicacion.montoInteresCentimos ?? 0;
+      interesPorPrestamo.set(
+        prestamo.id,
+        (interesPorPrestamo.get(prestamo.id) ?? 0) + interes,
+      );
+      interesPorPersona.set(
+        prestamo.personaId,
+        (interesPorPersona.get(prestamo.personaId) ?? 0) + interes,
+      );
+    }
+  }
+
+  const perdidasPorPrestamo = new Map<string, number>();
+  const perdidasPorPersona = new Map<string, number>();
+  for (const prestamo of ctx.prestamos) {
+    if (prestamo.estado !== 'INCOBRABLE' || prestamo.moneda !== moneda) continue;
+    const fecha = (prestamo.fechaEstado ?? '').slice(0, 10);
+    if (fecha < periodo || fecha > fin) continue;
+    const perdida = Math.max(
+      0,
+      prestamo.capitalCentimos - cobradoPrestamo(ctx, prestamo.id),
+    );
+    if (perdida === 0) continue;
+    perdidasPorPrestamo.set(prestamo.id, perdida);
+    perdidasPorPersona.set(
+      prestamo.personaId,
+      (perdidasPorPersona.get(prestamo.personaId) ?? 0) + perdida,
+    );
+  }
+
+  const porSuscripcionMap = new Map<string, LineaRentabilidad>();
+  for (const costo of ctx.costos) {
+    const suscripcion = ctx.mapaSuscripciones.get(costo.suscripcionId);
+    if (
+      !suscripcion ||
+      costo.periodo !== periodo ||
+      suscripcion.moneda !== moneda
+    ) {
+      continue;
+    }
+    const cobrado = cobradoPorSuscripcion.get(suscripcion.id) ?? 0;
+    const margen = cobrado - costo.montoCentimos;
+    porSuscripcionMap.set(suscripcion.id, {
+      tipo: 'SUSCRIPCION',
+      id: suscripcion.id,
+      nombre: suscripcion.nombre,
+      margenSuscripcionesCentimos: margen,
+      interesCobradoCentimos: 0,
+      perdidasCentimos: 0,
+      resultadoCentimos: margen,
+    });
+  }
+  for (const [suscripcionId, cobrado] of cobradoPorSuscripcion) {
+    if (porSuscripcionMap.has(suscripcionId)) continue;
+    const suscripcion = ctx.mapaSuscripciones.get(suscripcionId);
+    if (!suscripcion || suscripcion.moneda !== moneda) continue;
+    porSuscripcionMap.set(suscripcionId, {
+      tipo: 'SUSCRIPCION',
+      id: suscripcionId,
+      nombre: suscripcion.nombre,
+      margenSuscripcionesCentimos: cobrado,
+      interesCobradoCentimos: 0,
+      perdidasCentimos: 0,
+      resultadoCentimos: cobrado,
+    });
+  }
+
+  const porPrestamoMap = new Map<string, LineaRentabilidad>();
+  for (const prestamo of ctx.prestamos) {
+    if (prestamo.moneda !== moneda) continue;
+    const interes = interesPorPrestamo.get(prestamo.id) ?? 0;
+    const perdida = perdidasPorPrestamo.get(prestamo.id) ?? 0;
+    if (interes === 0 && perdida === 0) continue;
+    const persona = ctx.mapaPersonas.get(prestamo.personaId);
+    porPrestamoMap.set(prestamo.id, {
+      tipo: 'PRESTAMO',
+      id: prestamo.id,
+      nombre: persona
+        ? `${persona.apellidos}, ${persona.nombres}`
+        : 'Préstamo',
+      margenSuscripcionesCentimos: 0,
+      interesCobradoCentimos: interes,
+      perdidasCentimos: perdida,
+      resultadoCentimos: interes - perdida,
+    });
+  }
+
+  const idsPersonas = new Set<string>([
+    ...aportePorPersona.keys(),
+    ...interesPorPersona.keys(),
+    ...perdidasPorPersona.keys(),
+  ]);
+  const porPersona: LineaRentabilidad[] = [...idsPersonas].map((id) => {
+    const persona = ctx.mapaPersonas.get(id);
+    const aporte = aportePorPersona.get(id) ?? 0;
+    const interes = interesPorPersona.get(id) ?? 0;
+    const perdida = perdidasPorPersona.get(id) ?? 0;
+    return {
+      tipo: 'PERSONA',
+      id,
+      nombre: persona ? `${persona.apellidos}, ${persona.nombres}` : '—',
+      margenSuscripcionesCentimos: aporte,
+      interesCobradoCentimos: interes,
+      perdidasCentimos: perdida,
+      resultadoCentimos: aporte + interes - perdida,
+    };
+  });
+
+  const ordenar = (lineas: LineaRentabilidad[]) =>
+    lineas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+
+  return {
+    periodo,
+    moneda,
+    margenSuscripcionesCentimos: balance.margenSuscripcionesCentimos,
+    interesCobradoCentimos: balance.interesCobradoCentimos,
+    perdidasIncobrablesCentimos: balance.perdidasIncobrablesCentimos,
+    resultadoCentimos: balance.resultadoEconomicoCentimos,
+    costosCentimos: balance.egresoCostosCentimos,
+    capitalEnLaCalleCentimos: balance.capitalEnLaCalleCentimos,
+    rentabilidadPorcentaje: balance.rentabilidadPorcentaje,
+    porSuscripcion: ordenar([...porSuscripcionMap.values()]),
+    porPrestamo: ordenar([...porPrestamoMap.values()]),
+    porPersona: ordenar(porPersona),
+  };
+}
+
+export function rentabilidadACsv(informe: InformeRentabilidad): string {
+  const filas: FilaCsv[] = [];
+  const agregar = (linea: LineaRentabilidad) => {
+    filas.push({
+      tipo: linea.tipo,
+      nombre: linea.nombre,
+      margen_suscripciones: (
+        linea.margenSuscripcionesCentimos / 100
+      ).toFixed(2),
+      interes_cobrado: (linea.interesCobradoCentimos / 100).toFixed(2),
+      perdidas: (linea.perdidasCentimos / 100).toFixed(2),
+      resultado: (linea.resultadoCentimos / 100).toFixed(2),
+    });
+  };
+  informe.porSuscripcion.forEach(agregar);
+  informe.porPrestamo.forEach(agregar);
+  informe.porPersona.forEach(agregar);
+  return aCsv(filas);
+}
