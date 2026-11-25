@@ -8,10 +8,16 @@ import {
   listarSuscripciones,
   type DetalleSuscripcion,
 } from '../../aplicacion/suscripciones';
+import {
+  agregarMiembro,
+  agregarMiembroConPersonaNueva,
+  listarMiembros,
+} from '../../aplicacion/miembros';
 import { mensajeDeError } from '../../dominio/errores';
 import { formatearMoneda } from '../../dominio/dinero';
-import { formatearFecha } from '../../dominio/fechas';
-import type { Suscripcion } from '../../db/tipos';
+import { formatearFecha, hoy } from '../../dominio/fechas';
+import { nombreCompleto } from '../../dominio/nombres';
+import type { Persona, Suscripcion } from '../../db/tipos';
 import { Aviso, Cargando, Campo, Etiqueta, Vacio, colorEstadoSuscripcion } from '../componentes';
 
 const FORMULARIO = {
@@ -37,6 +43,18 @@ export function Suscripciones() {
     capacidad: '',
     diaCobro: '',
   });
+  const [miembroForm, setMiembroForm] = useState({
+    modo: 'EXISTENTE',
+    personaId: '',
+    nombres: '',
+    apellidos: '',
+    monto: '',
+    propia: false,
+    fechaInicio: hoy(),
+  });
+  const [miembroError, setMiembroError] = useState<string | null>(null);
+  const [miembroMensaje, setMiembroMensaje] = useState<string | null>(null);
+  const [similaresMiembro, setSimilaresMiembro] = useState<Persona[]>([]);
 
   const plataformas = useLiveQuery(
     () => db.plataformas.toArray().then((p) => p.filter((x) => x.activo)),
@@ -45,6 +63,29 @@ export function Suscripciones() {
   );
   const monedas = useLiveQuery(() => db.monedas.toArray(), [], []);
   const suscripciones = useLiveQuery(() => listarSuscripciones(db), [], []);
+  const personas = useLiveQuery(
+    () =>
+      db.personas.toArray().then((lista) =>
+        lista
+          .filter((p) => p.activo)
+          .sort((a, b) =>
+            nombreCompleto(a.apellidos, a.nombres).localeCompare(
+              nombreCompleto(b.apellidos, b.nombres),
+              'es',
+            ),
+          ),
+      ),
+    [],
+    [],
+  );
+  const miembros = useLiveQuery(
+    () =>
+      detalle
+        ? listarMiembros(db, detalle.suscripcion.id)
+        : Promise.resolve([]),
+    [detalle?.suscripcion.id],
+    [],
+  );
 
   function cambiar(campo: keyof typeof FORMULARIO, valor: string | boolean) {
     setFormulario((actual) => ({ ...actual, [campo]: valor }));
@@ -129,6 +170,64 @@ export function Suscripciones() {
       }
     } catch (fallo) {
       setError(mensajeDeError(fallo));
+    }
+  }
+
+  async function sumarMiembro(
+    resolucion?: 'crear' | 'reutilizar',
+  ) {
+    if (!detalle) return;
+    setMiembroError(null);
+    setMiembroMensaje(null);
+    try {
+      const monto = miembroForm.propia ? '0' : miembroForm.monto;
+      if (miembroForm.modo === 'NUEVO') {
+        const resultado = await agregarMiembroConPersonaNueva(
+          db,
+          detalle.suscripcion.id,
+          {
+            nombres: miembroForm.nombres,
+            apellidos: miembroForm.apellidos,
+          },
+          {
+            montoAcordado: monto,
+            esPlazaPropia: miembroForm.propia,
+            fechaInicio: miembroForm.fechaInicio,
+          },
+          resolucion,
+        );
+        if (resultado.estado === 'PERSONA_REQUIERE_DECISION') {
+          setSimilaresMiembro(resultado.similares);
+          return;
+        }
+        setMiembroMensaje(
+          `Miembro agregado: ${nombreCompleto(resultado.agregado!.persona.nombres, resultado.agregado!.persona.apellidos)}.`,
+        );
+      } else {
+        if (!miembroForm.personaId) {
+          setMiembroError('Selecciona una persona.');
+          return;
+        }
+        await agregarMiembro(db, detalle.suscripcion.id, {
+          personaId: miembroForm.personaId,
+          montoAcordado: monto,
+          esPlazaPropia: miembroForm.propia,
+          fechaInicio: miembroForm.fechaInicio,
+        });
+        setMiembroMensaje('Miembro agregado.');
+      }
+      setSimilaresMiembro([]);
+      setMiembroForm((actual) => ({
+        ...actual,
+        personaId: '',
+        nombres: '',
+        apellidos: '',
+        monto: '',
+        propia: false,
+      }));
+      setDetalle(await detalleSuscripcion(db, detalle.suscripcion.id));
+    } catch (fallo) {
+      setMiembroError(mensajeDeError(fallo));
     }
   }
 
@@ -375,6 +474,229 @@ export function Suscripciones() {
               <Aviso tipo="alerta">
                 Déficit proyectado: lo acordado no cubre el costo de la
                 suscripción.
+              </Aviso>
+            </div>
+          ) : null}
+
+          <hr className="separador" />
+          <h3>Miembros</h3>
+          {(miembros ?? []).length === 0 ? (
+            <Vacio>Esta suscripción todavía no tiene miembros.</Vacio>
+          ) : (
+            <div className="tabla-contenedor">
+              <table className="tabla">
+                <thead>
+                  <tr>
+                    <th>Persona</th>
+                    <th className="numero">Monto acordado</th>
+                    <th>Plaza</th>
+                    <th>Inicio</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(miembros ?? []).map(({ miembro, persona }) => (
+                    <tr key={miembro.id}>
+                      <td>
+                        {nombreCompleto(persona.apellidos, persona.nombres)}
+                      </td>
+                      <td className="numero">
+                        {formatearMoneda(
+                          miembro.montoAcordadoCentimos,
+                          detalle.suscripcion.moneda,
+                        )}
+                      </td>
+                      <td>
+                        {miembro.esPlazaPropia ? (
+                          <Etiqueta color="azul">PROPIA</Etiqueta>
+                        ) : (
+                          'Miembro'
+                        )}
+                      </td>
+                      <td>{formatearFecha(miembro.fechaInicio)}</td>
+                      <td>
+                        <Etiqueta
+                          color={miembro.estado === 'ACTIVO' ? 'verde' : 'gris'}
+                        >
+                          {miembro.estado}
+                        </Etiqueta>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <hr className="separador" />
+          <h3>Agregar miembro</h3>
+          <form
+            className="formulario"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void sumarMiembro();
+            }}
+          >
+            <Campo etiqueta="Persona">
+              <select
+                value={miembroForm.modo}
+                onChange={(e) =>
+                  setMiembroForm((actual) => ({
+                    ...actual,
+                    modo: e.target.value,
+                  }))
+                }
+              >
+                <option value="EXISTENTE">Existente</option>
+                <option value="NUEVO">Nueva persona</option>
+              </select>
+            </Campo>
+
+            {miembroForm.modo === 'EXISTENTE' ? (
+              <Campo etiqueta="Seleccionar persona">
+                <select
+                  value={miembroForm.personaId}
+                  onChange={(e) =>
+                    setMiembroForm((actual) => ({
+                      ...actual,
+                      personaId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Selecciona…</option>
+                  {(personas ?? []).map((persona) => (
+                    <option key={persona.id} value={persona.id}>
+                      {nombreCompleto(persona.apellidos, persona.nombres)}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            ) : (
+              <>
+                <Campo etiqueta="Nombres">
+                  <input
+                    value={miembroForm.nombres}
+                    onChange={(e) =>
+                      setMiembroForm((actual) => ({
+                        ...actual,
+                        nombres: e.target.value,
+                      }))
+                    }
+                  />
+                </Campo>
+                <Campo etiqueta="Apellidos">
+                  <input
+                    value={miembroForm.apellidos}
+                    onChange={(e) =>
+                      setMiembroForm((actual) => ({
+                        ...actual,
+                        apellidos: e.target.value,
+                      }))
+                    }
+                  />
+                </Campo>
+              </>
+            )}
+
+            <Campo etiqueta="Plaza propia">
+              <select
+                value={miembroForm.propia ? 'SI' : 'NO'}
+                onChange={(e) =>
+                  setMiembroForm((actual) => ({
+                    ...actual,
+                    propia: e.target.value === 'SI',
+                  }))
+                }
+              >
+                <option value="NO">No</option>
+                <option value="SI">Sí (sin cargo)</option>
+              </select>
+            </Campo>
+
+            <Campo etiqueta="Monto acordado">
+              <input
+                inputMode="decimal"
+                value={miembroForm.monto}
+                disabled={miembroForm.propia}
+                onChange={(e) =>
+                  setMiembroForm((actual) => ({
+                    ...actual,
+                    monto: e.target.value,
+                  }))
+                }
+                placeholder="15.00"
+              />
+            </Campo>
+
+            <Campo etiqueta="Fecha de inicio">
+              <input
+                type="date"
+                value={miembroForm.fechaInicio}
+                onChange={(e) =>
+                  setMiembroForm((actual) => ({
+                    ...actual,
+                    fechaInicio: e.target.value,
+                  }))
+                }
+              />
+            </Campo>
+
+            <div className="ancho-completo acciones">
+              <button
+                className="boton boton-primario"
+                type="submit"
+                disabled={detalle.suscripcion.estado !== 'ACTIVA'}
+              >
+                Agregar miembro
+              </button>
+              {detalle.suscripcion.estado !== 'ACTIVA' ? (
+                <span className="nota">
+                  Activa la suscripción para agregar miembros.
+                </span>
+              ) : null}
+            </div>
+
+            {miembroError ? (
+              <div className="ancho-completo">
+                <Aviso tipo="error">{miembroError}</Aviso>
+              </div>
+            ) : null}
+            {miembroMensaje ? (
+              <div className="ancho-completo">
+                <Aviso tipo="exito">{miembroMensaje}</Aviso>
+              </div>
+            ) : null}
+          </form>
+
+          {similaresMiembro.length > 0 ? (
+            <div style={{ marginTop: '0.8rem' }}>
+              <Aviso tipo="alerta">
+                <div>
+                  <strong>Hay personas similares:</strong>
+                  <ul style={{ margin: '0.3rem 0 0.5rem', paddingLeft: '1.1rem' }}>
+                    {similaresMiembro.map((persona) => (
+                      <li key={persona.id}>
+                        {nombreCompleto(persona.apellidos, persona.nombres)}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="acciones">
+                    <button
+                      className="boton boton-primario boton-pequeno"
+                      type="button"
+                      onClick={() => void sumarMiembro('reutilizar')}
+                    >
+                      Usar existente
+                    </button>
+                    <button
+                      className="boton boton-secundario boton-pequeno"
+                      type="button"
+                      onClick={() => void sumarMiembro('crear')}
+                    >
+                      Crear de todos modos
+                    </button>
+                  </div>
+                </div>
               </Aviso>
             </div>
           ) : null}
