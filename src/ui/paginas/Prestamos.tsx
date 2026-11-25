@@ -1,12 +1,21 @@
 import { useState, type FormEvent } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../db/baseDatos';
 import {
+  crearPrestamo,
+  crearPrestamoConPersonaNueva,
+  cuotasDePrestamo,
+  listarPrestamos,
   simularPrestamo,
+  type PrestamoListado,
   type SimulacionPrestamo,
 } from '../../aplicacion/prestamos';
 import { formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy, sumarMeses } from '../../dominio/fechas';
 import { mensajeDeError } from '../../dominio/errores';
-import { Aviso, Campo } from '../componentes';
+import { nombreCompleto } from '../../dominio/nombres';
+import type { CuotaPrestamo, Persona } from '../../db/tipos';
+import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
 
 export function Prestamos() {
   const [formulario, setFormulario] = useState({
@@ -17,6 +26,45 @@ export function Prestamos() {
   });
   const [simulacion, setSimulacion] = useState<SimulacionPrestamo | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [alta, setAlta] = useState({
+    modo: 'EXISTENTE',
+    personaId: '',
+    nombres: '',
+    apellidos: '',
+    moneda: 'PEN',
+    capital: '2000.00',
+    tasaMensual: '5',
+    plazoMeses: '6',
+    fechaPrestamo: hoy(),
+    estricto: 'NO',
+    notas: '',
+  });
+  const [errorAlta, setErrorAlta] = useState<string | null>(null);
+  const [mensajeAlta, setMensajeAlta] = useState<string | null>(null);
+  const [similaresAlta, setSimilaresAlta] = useState<Persona[]>([]);
+  const [seleccion, setSeleccion] = useState<{
+    prestamo: PrestamoListado;
+    cuotas: CuotaPrestamo[];
+  } | null>(null);
+
+  const personas = useLiveQuery(
+    () =>
+      db.personas.toArray().then((lista) =>
+        lista
+          .filter((p) => p.activo)
+          .sort((a, b) =>
+            nombreCompleto(a.apellidos, a.nombres).localeCompare(
+              nombreCompleto(b.apellidos, b.nombres),
+              'es',
+            ),
+          ),
+      ),
+    [],
+    [],
+  );
+  const monedas = useLiveQuery(() => db.monedas.toArray(), [], []);
+  const prestamos = useLiveQuery(() => listarPrestamos(db), [], []);
 
   function simular(evento: FormEvent) {
     evento.preventDefault();
@@ -34,6 +82,74 @@ export function Prestamos() {
       setSimulacion(null);
       setError(mensajeDeError(fallo));
     }
+  }
+
+  async function crear(resolucion?: 'crear' | 'reutilizar') {
+    setErrorAlta(null);
+    setMensajeAlta(null);
+    try {
+      const datos = {
+        moneda: alta.moneda,
+        capital: alta.capital,
+        tasaMensual: Number(alta.tasaMensual),
+        plazoMeses: Number(alta.plazoMeses),
+        fechaPrestamo: alta.fechaPrestamo,
+        estrictoCumplimiento: alta.estricto === 'SI',
+        notas: alta.notas,
+      };
+      let creado;
+      if (alta.modo === 'NUEVO') {
+        const resultado = await crearPrestamoConPersonaNueva(
+          db,
+          { nombres: alta.nombres, apellidos: alta.apellidos },
+          datos,
+          resolucion,
+        );
+        if (resultado.estado === 'PERSONA_REQUIERE_DECISION') {
+          setSimilaresAlta(resultado.similares);
+          return;
+        }
+        creado = resultado.creado!;
+      } else {
+        if (!alta.personaId) {
+          setErrorAlta('Selecciona una persona.');
+          return;
+        }
+        creado = await crearPrestamo(db, {
+          ...datos,
+          personaId: alta.personaId,
+        });
+      }
+      setSimilaresAlta([]);
+      setMensajeAlta(
+        `Préstamo creado con ${creado.cuotas.length} cuotas.`,
+      );
+      setAlta((actual) => ({
+        ...actual,
+        personaId: '',
+        nombres: '',
+        apellidos: '',
+        notas: '',
+      }));
+      const listado = (await listarPrestamos(db)).find(
+        (p) => p.id === creado!.prestamo.id,
+      );
+      if (listado) {
+        setSeleccion({
+          prestamo: listado,
+          cuotas: await cuotasDePrestamo(db, listado.id),
+        });
+      }
+    } catch (fallo) {
+      setErrorAlta(mensajeDeError(fallo));
+    }
+  }
+
+  async function verCronograma(prestamo: PrestamoListado) {
+    setSeleccion({
+      prestamo,
+      cuotas: await cuotasDePrestamo(db, prestamo.id),
+    });
   }
 
   return (
@@ -105,6 +221,187 @@ export function Prestamos() {
         ) : null}
       </article>
 
+      <article className="tarjeta">
+        <h2>Registrar préstamo</h2>
+        <form
+          className="formulario"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void crear();
+          }}
+        >
+          <Campo etiqueta="Titular">
+            <select
+              value={alta.modo}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, modo: e.target.value }))
+              }
+            >
+              <option value="EXISTENTE">Persona existente</option>
+              <option value="NUEVO">Persona nueva</option>
+            </select>
+          </Campo>
+          {alta.modo === 'EXISTENTE' ? (
+            <Campo etiqueta="Persona">
+              <select
+                value={alta.personaId}
+                onChange={(e) =>
+                  setAlta((a) => ({ ...a, personaId: e.target.value }))
+                }
+              >
+                <option value="">Selecciona…</option>
+                {(personas ?? []).map((persona) => (
+                  <option key={persona.id} value={persona.id}>
+                    {nombreCompleto(persona.apellidos, persona.nombres)}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          ) : (
+            <>
+              <Campo etiqueta="Nombres">
+                <input
+                  value={alta.nombres}
+                  onChange={(e) =>
+                    setAlta((a) => ({ ...a, nombres: e.target.value }))
+                  }
+                />
+              </Campo>
+              <Campo etiqueta="Apellidos">
+                <input
+                  value={alta.apellidos}
+                  onChange={(e) =>
+                    setAlta((a) => ({ ...a, apellidos: e.target.value }))
+                  }
+                />
+              </Campo>
+            </>
+          )}
+          <Campo etiqueta="Moneda">
+            <select
+              value={alta.moneda}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, moneda: e.target.value }))
+              }
+            >
+              {(monedas ?? []).map((moneda) => (
+                <option key={moneda.codigo} value={moneda.codigo}>
+                  {moneda.codigo}
+                </option>
+              ))}
+            </select>
+          </Campo>
+          <Campo etiqueta="Capital *">
+            <input
+              inputMode="decimal"
+              value={alta.capital}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, capital: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo etiqueta="Tasa mensual (%) *">
+            <input
+              inputMode="decimal"
+              value={alta.tasaMensual}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, tasaMensual: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo etiqueta="Plazo (meses) *">
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={alta.plazoMeses}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, plazoMeses: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo etiqueta="Fecha del préstamo *">
+            <input
+              type="date"
+              value={alta.fechaPrestamo}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, fechaPrestamo: e.target.value }))
+              }
+            />
+          </Campo>
+          <Campo
+            etiqueta="Estricto cumplimiento"
+            ayuda="Estricto suma lo vencido al exigible del mes."
+          >
+            <select
+              value={alta.estricto}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, estricto: e.target.value }))
+              }
+            >
+              <option value="NO">Flexible</option>
+              <option value="SI">Estricto</option>
+            </select>
+          </Campo>
+          <Campo etiqueta="Notas">
+            <input
+              value={alta.notas}
+              onChange={(e) =>
+                setAlta((a) => ({ ...a, notas: e.target.value }))
+              }
+            />
+          </Campo>
+          <div className="ancho-completo acciones">
+            <button className="boton boton-primario" type="submit">
+              Crear préstamo
+            </button>
+          </div>
+          {errorAlta ? (
+            <div className="ancho-completo">
+              <Aviso tipo="error">{errorAlta}</Aviso>
+            </div>
+          ) : null}
+          {mensajeAlta ? (
+            <div className="ancho-completo">
+              <Aviso tipo="exito">{mensajeAlta}</Aviso>
+            </div>
+          ) : null}
+        </form>
+
+        {similaresAlta.length > 0 ? (
+          <div style={{ marginTop: '0.8rem' }}>
+            <Aviso tipo="alerta">
+              <div>
+                <strong>Hay personas similares:</strong>
+                <ul style={{ margin: '0.3rem 0 0.5rem', paddingLeft: '1.1rem' }}>
+                  {similaresAlta.map((persona) => (
+                    <li key={persona.id}>
+                      {nombreCompleto(persona.apellidos, persona.nombres)}
+                    </li>
+                  ))}
+                </ul>
+                <div className="acciones">
+                  <button
+                    className="boton boton-primario boton-pequeno"
+                    type="button"
+                    onClick={() => void crear('reutilizar')}
+                  >
+                    Usar existente
+                  </button>
+                  <button
+                    className="boton boton-secundario boton-pequeno"
+                    type="button"
+                    onClick={() => void crear('crear')}
+                  >
+                    Crear de todos modos
+                  </button>
+                </div>
+              </div>
+            </Aviso>
+          </div>
+        ) : null}
+      </article>
+
       {simulacion ? (
         <article className="tarjeta">
           <div className="encabezado-tarjeta">
@@ -162,6 +459,171 @@ export function Prestamos() {
           <p className="nota" style={{ marginTop: '0.6rem' }}>
             La última cuota absorbe el redondeo para que la suma sea exacta.
           </p>
+        </article>
+      ) : null}
+
+      <article className="tarjeta">
+        <div className="encabezado-tarjeta">
+          <h2>Préstamos registrados</h2>
+          <span className="nota">{prestamos?.length ?? 0} en total</span>
+        </div>
+        {prestamos === undefined ? (
+          <p className="cargando">Cargando…</p>
+        ) : prestamos.length === 0 ? (
+          <Vacio>Aún no hay préstamos registrados.</Vacio>
+        ) : (
+          <div className="tabla-contenedor">
+            <table className="tabla">
+              <thead>
+                <tr>
+                  <th>Titular</th>
+                  <th>Fecha</th>
+                  <th className="numero">Capital</th>
+                  <th>Plazo</th>
+                  <th>Tasa</th>
+                  <th>Tipo</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prestamos.map((prestamo) => (
+                  <tr key={prestamo.id}>
+                    <td>{prestamo.persona}</td>
+                    <td>{formatearFecha(prestamo.fechaPrestamo)}</td>
+                    <td className="numero">
+                      {formatearMoneda(
+                        prestamo.capitalCentimos,
+                        prestamo.moneda,
+                      )}
+                    </td>
+                    <td>{prestamo.plazoMeses} m</td>
+                    <td>{prestamo.tasaMensual}%</td>
+                    <td>
+                      {prestamo.estrictoCumplimiento ? 'Estricto' : 'Flexible'}
+                    </td>
+                    <td>
+                      <Etiqueta
+                        color={
+                          prestamo.estado === 'ACTIVO'
+                            ? 'azul'
+                            : prestamo.estado === 'CANCELADO'
+                              ? 'verde'
+                              : 'roja'
+                        }
+                      >
+                        {prestamo.estado}
+                      </Etiqueta>
+                    </td>
+                    <td>
+                      <button
+                        className="boton boton-secundario boton-pequeno"
+                        type="button"
+                        onClick={() => void verCronograma(prestamo)}
+                      >
+                        Cronograma
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
+      {seleccion ? (
+        <article className="tarjeta">
+          <div className="encabezado-tarjeta">
+            <h2>Cronograma de {seleccion.prestamo.persona}</h2>
+            <button
+              className="boton boton-secundario boton-pequeno"
+              type="button"
+              onClick={() => setSeleccion(null)}
+            >
+              Cerrar
+            </button>
+          </div>
+          <dl className="detalle-lista">
+            <div>
+              <dt>Capital</dt>
+              <dd>
+                {formatearMoneda(
+                  seleccion.prestamo.capitalCentimos,
+                  seleccion.prestamo.moneda,
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Plazo</dt>
+              <dd>{seleccion.prestamo.plazoMeses} meses</dd>
+            </div>
+            <div>
+              <dt>Tasa mensual</dt>
+              <dd>{seleccion.prestamo.tasaMensual}%</dd>
+            </div>
+            <div>
+              <dt>Cumplimiento</dt>
+              <dd>
+                {seleccion.prestamo.estrictoCumplimiento
+                  ? 'Estricto'
+                  : 'Flexible'}
+              </dd>
+            </div>
+          </dl>
+          <div className="tabla-contenedor" style={{ marginTop: '0.8rem' }}>
+            <table className="tabla">
+              <thead>
+                <tr>
+                  <th>N°</th>
+                  <th>Vencimiento</th>
+                  <th className="numero">Capital</th>
+                  <th className="numero">Interés</th>
+                  <th className="numero">Cuota</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {seleccion.cuotas.map((cuota) => (
+                  <tr key={cuota.id}>
+                    <td>{cuota.numeroCuota}</td>
+                    <td>{formatearFecha(cuota.fechaVencimiento)}</td>
+                    <td className="numero">
+                      {formatearMoneda(
+                        cuota.capitalProgramadoCentimos,
+                        seleccion.prestamo.moneda,
+                      )}
+                    </td>
+                    <td className="numero">
+                      {formatearMoneda(
+                        cuota.interesProgramadoCentimos,
+                        seleccion.prestamo.moneda,
+                      )}
+                    </td>
+                    <td className="numero">
+                      {formatearMoneda(
+                        cuota.montoProgramadoCentimos,
+                        seleccion.prestamo.moneda,
+                      )}
+                    </td>
+                    <td>
+                      <Etiqueta
+                        color={
+                          cuota.estado === 'PAGADA'
+                            ? 'verde'
+                            : cuota.estado === 'PARCIAL'
+                              ? 'ambar'
+                              : 'gris'
+                        }
+                      >
+                        {cuota.estado}
+                      </Etiqueta>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </article>
       ) : null}
     </section>
