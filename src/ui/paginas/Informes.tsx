@@ -8,6 +8,8 @@ import {
   informePrestamos,
   informeSuscripciones,
   prestamosACsv,
+  rentabilidad,
+  rentabilidadACsv,
   suscripcionesACsv,
 } from '../../aplicacion/reportes';
 import { formatearMoneda } from '../../dominio/dinero';
@@ -49,6 +51,10 @@ export function Informes() {
   const prestamos = useLiveQuery(
     () => informePrestamos(db, moneda),
     [moneda],
+  );
+  const rentabilidadMes = useLiveQuery(
+    () => rentabilidad(db, periodo, moneda),
+    [periodo, moneda],
   );
 
   return (
@@ -570,6 +576,130 @@ export function Informes() {
               Un resultado negativo en un préstamo activo significa que aún no
               se recuperó el capital, no que sea pérdida.
             </p>
+          </article>
+
+          <article className="tarjeta">
+            <div className="encabezado-tarjeta">
+              <h2>Rentabilidad</h2>
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                disabled={!rentabilidadMes}
+                onClick={() =>
+                  descargarCsv(
+                    `rentabilidad-${periodo.slice(0, 7)}-${moneda}.csv`,
+                    rentabilidadACsv(rentabilidadMes!),
+                  )
+                }
+              >
+                Exportar CSV
+              </button>
+            </div>
+            {!rentabilidadMes ? (
+              <Cargando />
+            ) : (
+              <>
+                <dl className="detalle-lista">
+                  <div>
+                    <dt>Margen de suscripciones</dt>
+                    <dd>
+                      {formatearMoneda(
+                        rentabilidadMes.margenSuscripcionesCentimos,
+                        moneda,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Interés cobrado</dt>
+                    <dd>
+                      {formatearMoneda(
+                        rentabilidadMes.interesCobradoCentimos,
+                        moneda,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Pérdidas incobrables</dt>
+                    <dd>
+                      {formatearMoneda(
+                        rentabilidadMes.perdidasIncobrablesCentimos,
+                        moneda,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Resultado</dt>
+                    <dd>
+                      {formatearMoneda(
+                        rentabilidadMes.resultadoCentimos,
+                        moneda,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Rentabilidad</dt>
+                    <dd>{rentabilidadMes.rentabilidadPorcentaje}%</dd>
+                  </div>
+                </dl>
+
+                <div className="tabla-contenedor" style={{ marginTop: '0.8rem' }}>
+                  <table className="tabla">
+                    <thead>
+                      <tr>
+                        <th>Origen</th>
+                        <th>Nombre</th>
+                        <th className="numero">Margen subs.</th>
+                        <th className="numero">Interés</th>
+                        <th className="numero">Pérdidas</th>
+                        <th className="numero">Resultado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ...rentabilidadMes.porSuscripcion,
+                        ...rentabilidadMes.porPrestamo,
+                        ...rentabilidadMes.porPersona,
+                      ].map((linea) => (
+                        <tr key={`${linea.tipo}-${linea.id}`}>
+                          <td>
+                            <Etiqueta
+                              color={
+                                linea.tipo === 'PERSONA'
+                                  ? 'azul'
+                                  : linea.tipo === 'PRESTAMO'
+                                    ? 'ambar'
+                                    : 'gris'
+                              }
+                            >
+                              {linea.tipo}
+                            </Etiqueta>
+                          </td>
+                          <td>{linea.nombre}</td>
+                          <td className="numero">
+                            {formatearMoneda(
+                              linea.margenSuscripcionesCentimos,
+                              moneda,
+                            )}
+                          </td>
+                          <td className="numero">
+                            {formatearMoneda(
+                              linea.interesCobradoCentimos,
+                              moneda,
+                            )}
+                          </td>
+                          <td className="numero">
+                            {formatearMoneda(linea.perdidasCentimos, moneda)}
+                          </td>
+                          <td className="numero">
+                            {formatearMoneda(linea.resultadoCentimos, moneda)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </article>
         </>
       )}
