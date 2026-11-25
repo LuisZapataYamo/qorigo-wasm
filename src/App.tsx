@@ -7,6 +7,7 @@ import { Suscripciones } from './ui/paginas/Suscripciones';
 import { Prestamos } from './ui/paginas/Prestamos';
 import { Pagos } from './ui/paginas/Pagos';
 import { Informes } from './ui/paginas/Informes';
+import { Portal } from './ui/paginas/Portal';
 
 export function App() {
   return (
@@ -23,10 +24,7 @@ export function App() {
             path="respaldo"
             element={<EnConstruccion titulo="Respaldo" caso="CU-25 y CU-26" />}
           />
-          <Route
-            path="portal"
-            element={<EnConstruccion titulo="Vista por persona" caso="CU-22" />}
-          />
+          <Route path="portal" element={<Portal />} />
           <Route
             path="configuracion"
             element={<EnConstruccion titulo="Configuración" caso="CU-23" />}
