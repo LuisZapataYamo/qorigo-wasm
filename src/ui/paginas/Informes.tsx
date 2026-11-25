@@ -4,6 +4,9 @@ import { db } from '../../db/baseDatos';
 import {
   DEFINICIONES,
   dashboard,
+  informePerdidasSuscripciones,
+  informeSuscripciones,
+  suscripcionesACsv,
 } from '../../aplicacion/reportes';
 import { formatearMoneda } from '../../dominio/dinero';
 import {
@@ -11,7 +14,17 @@ import {
   periodoActual,
   periodoDe,
 } from '../../dominio/fechas';
-import { Cargando, Aviso } from '../componentes';
+import { Cargando, Aviso, Etiqueta } from '../componentes';
+
+function descargarCsv(nombre: string, contenido: string) {
+  const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = nombre;
+  enlace.click();
+  URL.revokeObjectURL(url);
+}
 
 export function Informes() {
   const [mes, setMes] = useState(periodoActual().slice(0, 7));
@@ -21,6 +34,14 @@ export function Informes() {
   const monedas = useLiveQuery(() => db.monedas.toArray(), [], []);
   const tablero = useLiveQuery(
     () => dashboard(db, periodo, moneda),
+    [periodo, moneda],
+  );
+  const suscripciones = useLiveQuery(
+    () => informeSuscripciones(db, periodo, moneda),
+    [periodo, moneda],
+  );
+  const perdidasSuscripciones = useLiveQuery(
+    () => informePerdidasSuscripciones(db, periodo, moneda),
     [periodo, moneda],
   );
 
@@ -284,6 +305,169 @@ export function Informes() {
               </ul>
             </article>
           </div>
+
+          <article className="tarjeta">
+            <div className="encabezado-tarjeta">
+              <h2>Suscripciones del periodo</h2>
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                disabled={!suscripciones || suscripciones.length === 0}
+                onClick={() =>
+                  descargarCsv(
+                    `suscripciones-${periodo.slice(0, 7)}-${moneda}.csv`,
+                    suscripcionesACsv(suscripciones ?? []),
+                  )
+                }
+              >
+                Exportar CSV
+              </button>
+            </div>
+            {!suscripciones ? (
+              <Cargando />
+            ) : suscripciones.length === 0 ? (
+              <p className="nota">
+                No hay costos generados para este periodo. Genera el periodo
+                desde Suscripciones.
+              </p>
+            ) : (
+              <div className="tabla-contenedor">
+                <table className="tabla">
+                  <thead>
+                    <tr>
+                      <th>Suscripción</th>
+                      <th className="numero">Costo</th>
+                      <th className="numero">Esperado</th>
+                      <th className="numero">Cobrado</th>
+                      <th className="numero">Margen real</th>
+                      <th className="numero">Margen proyectado</th>
+                      <th>Causa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suscripciones.map((linea) => (
+                      <tr key={linea.suscripcionId}>
+                        <td>
+                          <strong>{linea.nombre}</strong>
+                          <div className="nota">{linea.plataforma}</div>
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(linea.costoCentimos, moneda)}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(linea.esperadoCentimos, moneda)}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(linea.cobradoCentimos, moneda)}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(linea.margenRealCentimos, moneda)}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(
+                            linea.margenProyectadoCentimos,
+                            moneda,
+                          )}
+                        </td>
+                        <td>
+                          {linea.causaPerdida ? (
+                            <Etiqueta color="roja">
+                              {linea.causaPerdida}
+                            </Etiqueta>
+                          ) : (
+                            <Etiqueta color="verde">SIN PÉRDIDA</Etiqueta>
+                          )}
+                          {linea.esUsoPersonal ? (
+                            <div>
+                              <Etiqueta color="azul">USO PERSONAL</Etiqueta>
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </article>
+
+          <article className="tarjeta">
+            <h2>Pérdidas por suscripción</h2>
+            {(perdidasSuscripciones ?? []).length === 0 ? (
+              <p className="nota">No hay suscripciones en pérdida.</p>
+            ) : (
+              (perdidasSuscripciones ?? []).map((linea) => (
+                <div key={linea.suscripcionId} style={{ marginBottom: '1rem' }}>
+                  <div className="encabezado-tarjeta">
+                    <h3>
+                      {linea.nombre} ·{' '}
+                      {linea.causaPerdida === 'TARIFA'
+                        ? 'la tarifa no cubre el costo'
+                        : linea.causaPerdida === 'MOROSIDAD'
+                          ? 'morosidad'
+                          : 'tarifa y morosidad'}
+                    </h3>
+                    <span className="nota">
+                      Margen real{' '}
+                      {formatearMoneda(linea.margenRealCentimos, moneda)}
+                    </span>
+                  </div>
+                  <div className="tabla-contenedor">
+                    <table className="tabla">
+                      <thead>
+                        <tr>
+                          <th>Miembro</th>
+                          <th className="numero">Acordado</th>
+                          <th className="numero">Pagado</th>
+                          <th className="numero">Saldo</th>
+                          <th className="numero">Costo por plaza</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {linea.miembros.map((miembro) => (
+                          <tr key={miembro.personaId}>
+                            <td>{miembro.nombre}</td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                miembro.montoCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                miembro.pagadoCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                miembro.saldoCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                miembro.costoPorPlazaCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td>
+                              {miembro.aportaMenosQueCosto ? (
+                                <Etiqueta color="ambar">
+                                  APORTA MENOS
+                                </Etiqueta>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))
+            )}
+          </article>
         </>
       )}
     </section>

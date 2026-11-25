@@ -7,8 +7,10 @@ import type {
   MiembroSuscripcion,
   Pago,
   Persona,
+  Plataforma,
   Prestamo,
   Suscripcion,
+  CausaPerdida,
 } from '../db/tipos';
 import {
   diasEntre,
@@ -23,6 +25,7 @@ import { cargarAuxiliaresSaldos, type AuxiliaresSaldos } from './saldos';
 
 export interface ContextoReportes {
   personas: Persona[];
+  plataformas: Plataforma[];
   suscripciones: Suscripcion[];
   miembros: MiembroSuscripcion[];
   cargos: CargoSuscripcion[];
@@ -46,6 +49,7 @@ export interface ContextoReportes {
 export async function cargarContexto(db: BaseDatos): Promise<ContextoReportes> {
   const [
     personas,
+    plataformas,
     suscripciones,
     miembros,
     cargos,
@@ -58,6 +62,7 @@ export async function cargarContexto(db: BaseDatos): Promise<ContextoReportes> {
     config,
   ] = await Promise.all([
     db.personas.toArray(),
+    db.plataformas.toArray(),
     db.suscripciones.toArray(),
     db.miembrosSuscripcion.toArray(),
     db.cargosSuscripcion.toArray(),
@@ -72,6 +77,7 @@ export async function cargarContexto(db: BaseDatos): Promise<ContextoReportes> {
 
   return {
     personas,
+    plataformas,
     suscripciones,
     miembros,
     cargos,
@@ -553,4 +559,164 @@ export function mesesDelAnio(periodo: string): string[] {
 
 export function periodoAnteriorA(periodo: string): string {
   return sumarMeses(periodo, -1);
+}
+
+/* ------------------------------- CU-18 ------------------------------- */
+
+export interface MiembroDetalleLinea {
+  personaId: string;
+  nombre: string;
+  montoCentimos: number;
+  pagadoCentimos: number;
+  saldoCentimos: number;
+  costoPorPlazaCentimos: number;
+  aportaMenosQueCosto: boolean;
+}
+
+export interface LineaSuscripcion {
+  suscripcionId: string;
+  nombre: string;
+  plataforma: string;
+  moneda: string;
+  periodo: string;
+  costoCentimos: number;
+  esperadoCentimos: number;
+  cobradoCentimos: number;
+  margenRealCentimos: number;
+  margenProyectadoCentimos: number;
+  causaPerdida: CausaPerdida;
+  alerta: boolean;
+  esUsoPersonal: boolean;
+  miembros: MiembroDetalleLinea[];
+}
+
+function lineaSuscripcion(
+  ctx: ContextoReportes,
+  costo: CostoSuscripcionPeriodo,
+): LineaSuscripcion | null {
+  const suscripcion = ctx.mapaSuscripciones.get(costo.suscripcionId);
+  if (!suscripcion) return null;
+  const plataforma =
+    ctx.plataformas.find((p) => p.id === suscripcion.plataformaId)?.nombre ??
+    '—';
+  const costoPorPlaza = Math.round(
+    costo.montoCentimos / Math.max(1, suscripcion.capacidad),
+  );
+
+  const cargos = ctx.cargos.filter(
+    (c) => c.periodo === costo.periodo && c.estado !== 'ANULADO',
+  );
+  const miembros: MiembroDetalleLinea[] = [];
+  let esperado = 0;
+  let cobrado = 0;
+
+  for (const cargo of cargos) {
+    const miembro = ctx.mapaMiembros.get(cargo.miembroId);
+    if (!miembro || miembro.suscripcionId !== suscripcion.id) continue;
+    const persona = ctx.mapaPersonas.get(miembro.personaId);
+    const pagado = pagadoCargo(ctx, cargo.id);
+    esperado += cargo.montoCentimos;
+    cobrado += pagado;
+    miembros.push({
+      personaId: miembro.personaId,
+      nombre: persona
+        ? `${persona.apellidos}, ${persona.nombres}`
+        : '—',
+      montoCentimos: cargo.montoCentimos,
+      pagadoCentimos: pagado,
+      saldoCentimos: Math.max(0, cargo.montoCentimos - pagado),
+      costoPorPlazaCentimos: costoPorPlaza,
+      aportaMenosQueCosto: cargo.montoCentimos < costoPorPlaza,
+    });
+  }
+  miembros.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+
+  let causa: CausaPerdida = null;
+  if (cobrado < costo.montoCentimos) {
+    if (esperado < costo.montoCentimos && cobrado < esperado) {
+      causa = 'AMBAS';
+    } else if (esperado < costo.montoCentimos) {
+      causa = 'TARIFA';
+    } else {
+      causa = 'MOROSIDAD';
+    }
+  }
+
+  return {
+    suscripcionId: suscripcion.id,
+    nombre: suscripcion.nombre,
+    plataforma,
+    moneda: suscripcion.moneda,
+    periodo: costo.periodo,
+    costoCentimos: costo.montoCentimos,
+    esperadoCentimos: esperado,
+    cobradoCentimos: cobrado,
+    margenRealCentimos: cobrado - costo.montoCentimos,
+    margenProyectadoCentimos: esperado - costo.montoCentimos,
+    causaPerdida: causa,
+    alerta: causa !== null && !suscripcion.esUsoPersonal,
+    esUsoPersonal: suscripcion.esUsoPersonal,
+    miembros,
+  };
+}
+
+export async function informeSuscripciones(
+  db: BaseDatos,
+  periodo: string = periodoActual(),
+  moneda = 'PEN',
+): Promise<LineaSuscripcion[]> {
+  const ctx = await cargarContexto(db);
+  return ctx.costos
+    .filter(
+      (c) =>
+        c.periodo === periodo &&
+        ctx.mapaSuscripciones.get(c.suscripcionId)?.moneda === moneda,
+    )
+    .map((costo) => lineaSuscripcion(ctx, costo))
+    .filter((linea): linea is LineaSuscripcion => linea !== null)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+
+/** Solo las que pierden y no son de uso personal. */
+export async function informePerdidasSuscripciones(
+  db: BaseDatos,
+  periodo: string = periodoActual(),
+  moneda = 'PEN',
+): Promise<LineaSuscripcion[]> {
+  const lineas = await informeSuscripciones(db, periodo, moneda);
+  return lineas.filter((linea) => linea.alerta && linea.causaPerdida !== null);
+}
+
+/* ------------------------------- CSV --------------------------------- */
+
+export type FilaCsv = Record<string, string | number | null>;
+
+export function aCsv(filas: FilaCsv[]): string {
+  if (filas.length === 0) return '';
+  const columnas = Object.keys(filas[0]);
+  const escapar = (valor: string | number | null | undefined) =>
+    `"${String(valor ?? '').replace(/"/g, '""')}"`;
+  return [
+    columnas.map(escapar).join(','),
+    ...filas.map((fila) =>
+      columnas.map((columna) => escapar(fila[columna])).join(','),
+    ),
+  ].join('\r\n');
+}
+
+export function suscripcionesACsv(lineas: LineaSuscripcion[]): string {
+  return aCsv(
+    lineas.map((linea) => ({
+      suscripcion: linea.nombre,
+      plataforma: linea.plataforma,
+      moneda: linea.moneda,
+      periodo: linea.periodo,
+      costo: (linea.costoCentimos / 100).toFixed(2),
+      esperado: (linea.esperadoCentimos / 100).toFixed(2),
+      cobrado: (linea.cobradoCentimos / 100).toFixed(2),
+      margen_real: (linea.margenRealCentimos / 100).toFixed(2),
+      margen_proyectado: (linea.margenProyectadoCentimos / 100).toFixed(2),
+      causa_perdida: linea.causaPerdida ?? '',
+    })),
+  );
 }
