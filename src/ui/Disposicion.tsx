@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useRecordatoriosAutomaticos } from './useRecordatorios';
 
 const ENLACES = [
   { a: '/', texto: 'Inicio', icono: '⌂' },
@@ -16,6 +17,7 @@ const ENLACES = [
 export function Disposicion() {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const ubicacion = useLocation();
+  useRecordatoriosAutomaticos();
 
   // Al cambiar de sección el listado móvil se cierra solo.
   useEffect(() => {
