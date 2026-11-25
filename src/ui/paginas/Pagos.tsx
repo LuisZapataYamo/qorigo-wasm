@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/baseDatos';
 import {
+  anularPago,
+  listarPagos,
   obtenerObligacionesPendientes,
   registrarPago,
 } from '../../aplicacion/pagos';
@@ -55,6 +57,12 @@ export function Pagos() {
         ? obtenerObligacionesPendientes(db, personaId, tipo)
         : Promise.resolve<ObligacionPendiente[]>([]),
     [personaId, tipo, refresco],
+    [],
+  );
+
+  const pagos = useLiveQuery(
+    () => listarPagos(db),
+    [refresco],
     [],
   );
 
@@ -112,8 +120,7 @@ export function Pagos() {
     }
   }
 
-  async function guardar(evento: React.FormEvent) {
-    evento.preventDefault();
+  async function guardar(evento: React.FormEvent) {    evento.preventDefault();
     setError(null);
     setMensaje(null);
     try {
@@ -171,6 +178,20 @@ export function Pagos() {
       setReferencia('');
       setObservacion('');
       setComprobantes([]);
+      setRefresco((n) => n + 1);
+    } catch (fallo) {
+      setError(mensajeDeError(fallo));
+    }
+  }
+
+  async function anular(pagoId: string) {
+    const motivo = window.prompt('Motivo de la anulación:');
+    if (!motivo) return;
+    setError(null);
+    setMensaje(null);
+    try {
+      await anularPago(db, pagoId, motivo);
+      setMensaje('Pago anulado. Los saldos y estados fueron recalculados.');
       setRefresco((n) => n + 1);
     } catch (fallo) {
       setError(mensajeDeError(fallo));
@@ -415,6 +436,76 @@ export function Pagos() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+
+      <article className="tarjeta">
+        <div className="encabezado-tarjeta">
+          <h2>Pagos registrados</h2>
+          <span className="nota">{pagos?.length ?? 0} pago(s)</span>
+        </div>
+        {(pagos ?? []).length === 0 ? (
+          <Vacio>Aún no hay pagos registrados.</Vacio>
+        ) : (
+          <div className="tabla-contenedor">
+            <table className="tabla">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Persona</th>
+                  <th>Método</th>
+                  <th className="numero">Monto</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(pagos ?? []).map((pago) => {
+                  const persona = (personas ?? []).find(
+                    (p) => p.id === pago.personaId,
+                  );
+                  return (
+                    <tr key={pago.id}>
+                      <td>{formatearFecha(pago.fechaPago)}</td>
+                      <td>
+                        {persona
+                          ? nombreCompleto(persona.apellidos, persona.nombres)
+                          : '—'}
+                      </td>
+                      <td>{pago.metodoPago}</td>
+                      <td className="numero">
+                        {formatearMoneda(pago.montoCentimos, pago.moneda)}
+                      </td>
+                      <td>
+                        <Etiqueta
+                          color={
+                            pago.estado === 'REGISTRADO' ? 'verde' : 'roja'
+                          }
+                        >
+                          {pago.estado}
+                        </Etiqueta>
+                      </td>
+                      <td>
+                        {pago.estado === 'REGISTRADO' ? (
+                          <button
+                            className="boton boton-peligro boton-pequeno"
+                            type="button"
+                            onClick={() => void anular(pago.id)}
+                          >
+                            Anular
+                          </button>
+                        ) : (
+                          <span className="nota">
+                            {pago.motivoAnulacion ?? '—'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
