@@ -509,6 +509,36 @@ export async function obtenerComprobantes(
   return db.comprobantesPago.where('pagoId').equals(pagoId).toArray();
 }
 
+/**
+ * Vista por persona (adaptación local del portal): un pago ajeno se comporta
+ * como inexistente, igual que un 404 en el plan original.
+ */
+export async function obtenerPagoDePersona(
+  db: BaseDatos,
+  pagoId: string,
+  personaId: string,
+): Promise<Pago> {
+  const pago = await db.pagos.get(pagoId);
+  if (!pago || pago.personaId !== personaId) {
+    throw new ErrorNoEncontrado('El pago no existe.');
+  }
+  return pago;
+}
+
+export async function obtenerComprobanteDePersona(
+  db: BaseDatos,
+  pagoId: string,
+  comprobanteId: string,
+  personaId: string,
+): Promise<ComprobantePago> {
+  await obtenerPagoDePersona(db, pagoId, personaId);
+  const comprobante = await db.comprobantesPago.get(comprobanteId);
+  if (!comprobante || comprobante.pagoId !== pagoId) {
+    throw new ErrorNoEncontrado('El comprobante no existe.');
+  }
+  return comprobante;
+}
+
 /* ------------------------------- CU-15 ------------------------------- */
 
 export async function anularPago(
