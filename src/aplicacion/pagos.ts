@@ -509,3 +509,119 @@ export async function obtenerComprobantes(
   return db.comprobantesPago.where('pagoId').equals(pagoId).toArray();
 }
 
+/* ------------------------------- CU-15 ------------------------------- */
+
+export async function anularPago(
+  db: BaseDatos,
+  pagoId: string,
+  motivo: string,
+  usuarioId?: string,
+): Promise<Pago> {
+  const pago = await db.pagos.get(pagoId);
+  if (!pago) throw new ErrorNoEncontrado('El pago no existe.');
+  const texto = motivo?.trim() ?? '';
+  if (!texto) {
+    throw new ErrorValidacion('El motivo es obligatorio.', 'motivo');
+  }
+  if (pago.estado === 'ANULADO') {
+    throw new ErrorReglaNegocio('El pago ya está anulado.');
+  }
+
+  const aplicaciones = await db.aplicacionesPago
+    .where('pagoId')
+    .equals(pagoId)
+    .toArray();
+
+  const [todosPagos, todasAplicaciones] = await Promise.all([
+    db.pagos.toArray(),
+    db.aplicacionesPago.toArray(),
+  ]);
+  const pagosValidos = new Set(
+    todosPagos
+      .filter((p) => p.estado === 'REGISTRADO' && p.id !== pagoId)
+      .map((p) => p.id),
+  );
+
+  const pagadoRestante = (idObligacion: string, campo: 'cargoId' | 'cuotaId') =>
+    todasAplicaciones
+      .filter(
+        (a) =>
+          a[campo] === idObligacion &&
+          pagosValidos.has(a.pagoId) &&
+          a.pagoId !== pagoId,
+      )
+      .reduce((total, a) => total + a.montoAplicadoCentimos, 0);
+
+  const actualizado: Pago = {
+    ...pago,
+    estado: 'ANULADO',
+    motivoAnulacion: texto,
+  };
+
+  await db.transaction(
+    'rw',
+    [db.pagos, db.cargosSuscripcion, db.cuotasPrestamo, db.prestamos, db.auditoria],
+    async () => {
+      await db.pagos.put(actualizado);
+
+      const prestamosAfectados = new Set<string>();
+      for (const aplicacion of aplicaciones) {
+        if (aplicacion.cargoId) {
+          const cargo = await db.cargosSuscripcion.get(aplicacion.cargoId);
+          if (!cargo) continue;
+          const pagado = pagadoRestante(cargo.id, 'cargoId');
+          const saldo = Math.max(0, cargo.montoCentimos - pagado);
+          const estado =
+            saldo <= 0 ? 'PAGADO' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+          await db.cargosSuscripcion.update(cargo.id, { estado });
+        }
+        if (aplicacion.cuotaId) {
+          const cuota = await db.cuotasPrestamo.get(aplicacion.cuotaId);
+          if (!cuota) continue;
+          const pagado = pagadoRestante(cuota.id, 'cuotaId');
+          const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
+          const estado =
+            saldo <= 0 ? 'PAGADA' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+          await db.cuotasPrestamo.update(cuota.id, { estado });
+          prestamosAfectados.add(cuota.prestamoId);
+        }
+      }
+
+      for (const prestamoId of prestamosAfectados) {
+        const prestamo = await db.prestamos.get(prestamoId);
+        if (!prestamo) continue;
+        const cuotas = await db.cuotasPrestamo
+          .where('prestamoId')
+          .equals(prestamoId)
+          .toArray();
+        const quedaPendiente = cuotas.some((cuota) => {
+          const pagado = pagadoRestante(cuota.id, 'cuotaId');
+          return pagado < cuota.montoProgramadoCentimos;
+        });
+        if (prestamo.estado === 'CANCELADO' && quedaPendiente) {
+          await db.prestamos.update(prestamoId, {
+            estado: 'ACTIVO',
+            fechaEstado: new Date().toISOString(),
+          });
+        }
+      }
+
+      await auditar(db, {
+        entidad: 'PAGO',
+        entidadId: pagoId,
+        accion: 'ANULAR',
+        usuarioId,
+        antes: { estado: pago.estado },
+        despues: {
+          estado: 'ANULADO',
+          motivo: texto,
+          aplicacionesRevertidas: aplicaciones.length,
+        },
+      });
+    },
+  );
+
+  return actualizado;
+}
+
+
