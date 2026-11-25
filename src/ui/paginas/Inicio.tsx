@@ -1,9 +1,55 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/baseDatos';
 import { formatearMoneda } from '../../dominio/dinero';
+import {
+  estimarAlmacenamiento,
+  formatearBytes,
+  persistenciaDisponible,
+  solicitarPersistencia,
+} from '../../aplicacion/almacenamiento';
+import { Aviso } from '../componentes';
+
+interface EventoInstalacion extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: string }>;
+}
 
 export function Inicio() {
+  const [eventoInstalacion, setEventoInstalacion] =
+    useState<EventoInstalacion | null>(null);
+  const [mensajeAlmacenamiento, setMensajeAlmacenamiento] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    const escuchar = (evento: Event) => {
+      evento.preventDefault();
+      setEventoInstalacion(evento as EventoInstalacion);
+    };
+    window.addEventListener('beforeinstallprompt', escuchar);
+    return () => window.removeEventListener('beforeinstallprompt', escuchar);
+  }, []);
+
+  async function pedirPersistencia() {
+    const concedida = await solicitarPersistencia();
+    const estimacion = await estimarAlmacenamiento();
+    setMensajeAlmacenamiento(
+      concedida
+        ? 'El navegador aceptó conservar los datos de forma persistente.'
+        : 'El navegador no concedió persistencia. Exporta respaldos con frecuencia.' +
+            (estimacion
+              ? ` Uso actual: ${formatearBytes(estimacion.usoBytes)} de ${formatearBytes(estimacion.cuotaBytes)}.`
+              : ''),
+    );
+  }
+
+  async function instalar() {
+    if (!eventoInstalacion) return;
+    await eventoInstalacion.prompt();
+    setEventoInstalacion(null);
+  }
   const resumen = useLiveQuery(async () => {
     const [personas, suscripciones, prestamos, pagos] = await Promise.all([
       db.personas.count(),
@@ -86,6 +132,51 @@ export function Inicio() {
             {formatearMoneda(0, resumen?.moneda ?? 'PEN')} de ejemplo de
             formato.
           </p>
+        </article>
+
+        <article className="tarjeta">
+          <h2>Aplicación instalable</h2>
+          <p>
+            QoriGo es una PWA: se instala desde el navegador y funciona sin
+            conexión después de la primera carga. En Android usa el menú del
+            navegador → “Instalar aplicación”.
+          </p>
+          <div className="acciones">
+            {eventoInstalacion ? (
+              <button
+                className="boton boton-primario"
+                type="button"
+                onClick={() => void instalar()}
+              >
+                Instalar QoriGo
+              </button>
+            ) : (
+              <span className="nota">
+                Si no aparece el instalador, usa el menú del navegador.
+              </span>
+            )}
+          </div>
+          <hr className="separador" />
+          <p className="nota">
+            El navegador puede borrar datos locales si necesita espacio. Puedes
+            pedirle que los conserve de forma persistente.
+          </p>
+          <div className="acciones">
+            <button
+              className="boton boton-secundario boton-pequeno"
+              type="button"
+              onClick={() => void pedirPersistencia()}
+            >
+              {persistenciaDisponible()
+                ? 'Solicitar almacenamiento persistente'
+                : 'Comprobar almacenamiento'}
+            </button>
+          </div>
+          {mensajeAlmacenamiento ? (
+            <div style={{ marginTop: '0.6rem' }}>
+              <Aviso tipo="info">{mensajeAlmacenamiento}</Aviso>
+            </div>
+          ) : null}
         </article>
       </div>
     </section>
