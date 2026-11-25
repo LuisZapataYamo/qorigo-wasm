@@ -1,0 +1,420 @@
+import type { BaseDatos } from '../db/baseDatos';
+import type {
+  AplicacionPago,
+  ComprobantePago,
+  ObligacionPendiente,
+  Pago,
+  TipoObligacion,
+} from '../db/tipos';
+import { auditar } from '../db/auditoria';
+import { aCentimos } from '../dominio/dinero';
+import {
+  ErrorNoEncontrado,
+  ErrorReglaNegocio,
+  ErrorValidacion,
+} from '../dominio/errores';
+import { esFechaValida, etiquetaPeriodo } from '../dominio/fechas';
+import { nuevoId } from '../dominio/ids';
+import { repartirCapitalInteres } from './prestamos';
+import { cargarAuxiliaresSaldos, pagadoDeCargo, pagadoDeCuota } from './saldos';
+
+export interface ComprobanteProcesado {
+  imagen: Blob;
+  mimeType: string;
+  ancho: number;
+  alto: number;
+  sha256: string;
+}
+
+export interface AplicacionSolicitada {
+  tipo: TipoObligacion;
+  obligacionId: string;
+  monto: number | string;
+}
+
+export interface EntradaPago {
+  personaId: string;
+  moneda: string;
+  fechaPago: string;
+  monto: number | string;
+  metodoPago: string;
+  referencia?: string;
+  observacion?: string;
+  aplicaciones?: AplicacionSolicitada[];
+  comprobantes?: ComprobanteProcesado[];
+}
+
+export interface ResultadoPago {
+  pago: Pago;
+  aplicaciones: AplicacionPago[];
+  remanenteCentimos: number;
+  obligaciones: ObligacionPendiente[];
+}
+
+export interface OpcionesRegistroPago {
+  alInsertarComprobante?: (indice: number) => void | Promise<void>;
+}
+
+/**
+ * Devuelve las obligaciones con saldo de una persona, las vencidas primero.
+ * La moneda se toma de la suscripción o del préstamo, nunca del pago.
+ */
+export async function obtenerObligacionesPendientes(
+  db: BaseDatos,
+  personaId: string,
+  tipo?: TipoObligacion,
+): Promise<ObligacionPendiente[]> {
+  const aux = await cargarAuxiliaresSaldos(db);
+  const resultado: ObligacionPendiente[] = [];
+
+  if (!tipo || tipo === 'SUSCRIPCION') {
+    const miembros = await db.miembrosSuscripcion
+      .where('personaId')
+      .equals(personaId)
+      .toArray();
+    for (const miembro of miembros) {
+      const suscripcion = await db.suscripciones.get(miembro.suscripcionId);
+      if (!suscripcion) continue;
+      const cargos = await db.cargosSuscripcion
+        .where('miembroId')
+        .equals(miembro.id)
+        .toArray();
+      for (const cargo of cargos) {
+        if (cargo.estado === 'ANULADO') continue;
+        const pagado = pagadoDeCargo(aux, cargo.id);
+        const saldo = Math.max(0, cargo.montoCentimos - pagado);
+        if (saldo <= 0) continue;
+        resultado.push({
+          tipo: 'SUSCRIPCION',
+          id: cargo.id,
+          personaId,
+          moneda: suscripcion.moneda,
+          concepto: `${suscripcion.nombre} · ${etiquetaPeriodo(cargo.periodo)}`,
+          fechaVencimiento: cargo.fechaVencimiento,
+          montoCentimos: cargo.montoCentimos,
+          pagadoCentimos: pagado,
+          saldoCentimos: saldo,
+        });
+      }
+    }
+  }
+
+  if (!tipo || tipo === 'PRESTAMO') {
+    const prestamos = await db.prestamos
+      .where('personaId')
+      .equals(personaId)
+      .toArray();
+    for (const prestamo of prestamos) {
+      if (prestamo.estado !== 'ACTIVO') continue;
+      const cuotas = await db.cuotasPrestamo
+        .where('prestamoId')
+        .equals(prestamo.id)
+        .toArray();
+      for (const cuota of cuotas) {
+        const pagado = pagadoDeCuota(aux, cuota.id);
+        const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
+        if (saldo <= 0) continue;
+        resultado.push({
+          tipo: 'PRESTAMO',
+          id: cuota.id,
+          personaId,
+          moneda: prestamo.moneda,
+          concepto: `Cuota ${cuota.numeroCuota} de ${prestamo.plazoMeses}`,
+          fechaVencimiento: cuota.fechaVencimiento,
+          montoCentimos: cuota.montoProgramadoCentimos,
+          pagadoCentimos: pagado,
+          saldoCentimos: saldo,
+          capitalCentimos: cuota.capitalProgramadoCentimos,
+          interesCentimos: cuota.interesProgramadoCentimos,
+        });
+      }
+    }
+  }
+
+  return resultado.sort((a, b) => {
+    if (a.fechaVencimiento === b.fechaVencimiento) return 0;
+    return a.fechaVencimiento < b.fechaVencimiento ? -1 : 1;
+  });
+}
+
+/**
+ * CU-12 / CU-13. Registra un pago, lo aplica por antigüedad (o según el
+ * reparto indicado), actualiza estados y guarda comprobantes en una sola
+ * transacción.
+ */
+export async function registrarPago(
+  db: BaseDatos,
+  entrada: EntradaPago,
+  opciones: OpcionesRegistroPago = {},
+): Promise<ResultadoPago> {
+  const persona = await db.personas.get(entrada.personaId);
+  if (!persona) throw new ErrorNoEncontrado('La persona no existe.');
+  if (!(await db.monedas.get(entrada.moneda))) {
+    throw new ErrorValidacion('La moneda no existe.', 'moneda');
+  }
+  if (!esFechaValida(entrada.fechaPago)) {
+    throw new ErrorValidacion('La fecha de pago no es válida.', 'fechaPago');
+  }
+  const metodo = entrada.metodoPago?.trim() ?? '';
+  if (!metodo) {
+    throw new ErrorValidacion('El método de pago es obligatorio.', 'metodoPago');
+  }
+  const montoCentimos = aCentimos(entrada.monto);
+  if (montoCentimos <= 0) {
+    throw new ErrorValidacion('El monto debe ser mayor que cero.', 'monto');
+  }
+
+  const obligaciones = await obtenerObligacionesPendientes(
+    db,
+    entrada.personaId,
+  );
+  const aux = await cargarAuxiliaresSaldos(db);
+  const porId = new Map(obligaciones.map((o) => [o.id, o]));
+
+  const aplicacionesCalculadas: Array<{
+    obligacion: ObligacionPendiente;
+    montoCentimos: number;
+  }> = [];
+
+  if (entrada.aplicaciones && entrada.aplicaciones.length > 0) {
+    const acumulado = new Map<string, number>();
+    for (const solicitada of entrada.aplicaciones) {
+      const obligacion = porId.get(solicitada.obligacionId);
+      if (!obligacion) {
+        throw new ErrorNoEncontrado(
+          'La obligación no existe o ya está pagada.',
+        );
+      }
+      if (obligacion.tipo !== solicitada.tipo) {
+        throw new ErrorValidacion(
+          'El tipo de la obligación no coincide.',
+          'aplicaciones',
+        );
+      }
+      if (obligacion.moneda !== entrada.moneda) {
+        throw new ErrorValidacion(
+          'La moneda del pago no coincide con la obligación.',
+          'moneda',
+        );
+      }
+      const monto = aCentimos(solicitada.monto);
+      if (monto <= 0) {
+        throw new ErrorValidacion(
+          'Cada aplicación debe ser mayor que cero.',
+          'aplicaciones',
+        );
+      }
+      acumulado.set(
+        obligacion.id,
+        (acumulado.get(obligacion.id) ?? 0) + monto,
+      );
+    }
+    for (const [id, total] of acumulado) {
+      const obligacion = porId.get(id)!;
+      if (total > obligacion.saldoCentimos) {
+        throw new ErrorReglaNegocio(
+          `La aplicación supera el saldo de "${obligacion.concepto}".`,
+        );
+      }
+    }
+    const suma = [...acumulado.values()].reduce((a, b) => a + b, 0);
+    if (suma > montoCentimos) {
+      throw new ErrorReglaNegocio(
+        'La suma de aplicaciones supera el monto del pago.',
+      );
+    }
+    for (const [id, total] of acumulado) {
+      aplicacionesCalculadas.push({
+        obligacion: porId.get(id)!,
+        montoCentimos: total,
+      });
+    }
+  } else {
+    let restante = montoCentimos;
+    for (const obligacion of obligaciones) {
+      if (restante <= 0) break;
+      if (obligacion.moneda !== entrada.moneda) continue;
+      const aplicar = Math.min(obligacion.saldoCentimos, restante);
+      if (aplicar <= 0) continue;
+      aplicacionesCalculadas.push({ obligacion, montoCentimos: aplicar });
+      restante -= aplicar;
+    }
+  }
+
+  const sumaAplicada = aplicacionesCalculadas.reduce(
+    (total, a) => total + a.montoCentimos,
+    0,
+  );
+  if (
+    sumaAplicada === 0 &&
+    obligaciones.length > 0 &&
+    !obligaciones.some((o) => o.moneda === entrada.moneda)
+  ) {
+    throw new ErrorValidacion(
+      'La moneda del pago no coincide con la de las obligaciones.',
+      'moneda',
+    );
+  }
+  if (sumaAplicada > montoCentimos) {
+    throw new ErrorReglaNegocio(
+      'La suma de aplicaciones supera el monto del pago.',
+    );
+  }
+
+  const pago: Pago = {
+    id: nuevoId(),
+    personaId: entrada.personaId,
+    moneda: entrada.moneda,
+    fechaPago: entrada.fechaPago,
+    montoCentimos,
+    metodoPago: metodo,
+    referencia: entrada.referencia?.trim() || undefined,
+    observacion: entrada.observacion?.trim() || undefined,
+    estado: 'REGISTRADO',
+    creadoEn: new Date().toISOString(),
+  };
+
+  const aplicaciones: AplicacionPago[] = aplicacionesCalculadas.map(
+    ({ obligacion, montoCentimos: monto }) => {
+      if (obligacion.tipo === 'PRESTAMO') {
+        const reparto = repartirCapitalInteres(
+          monto,
+          obligacion.capitalCentimos ?? 0,
+          obligacion.interesCentimos ?? 0,
+        );
+        return {
+          id: nuevoId(),
+          pagoId: pago.id,
+          cuotaId: obligacion.id,
+          montoAplicadoCentimos: monto,
+          montoCapitalCentimos: reparto.capital,
+          montoInteresCentimos: reparto.interes,
+        };
+      }
+      return {
+        id: nuevoId(),
+        pagoId: pago.id,
+        cargoId: obligacion.id,
+        montoAplicadoCentimos: monto,
+      };
+    },
+  );
+
+  const nuevosPorObligacion = new Map(
+    aplicacionesCalculadas.map((a) => [a.obligacion.id, a.montoCentimos]),
+  );
+
+  await db.transaction(
+    'rw',
+    [
+      db.pagos,
+      db.aplicacionesPago,
+      db.comprobantesPago,
+      db.cargosSuscripcion,
+      db.cuotasPrestamo,
+      db.prestamos,
+      db.auditoria,
+    ],
+    async () => {
+      await db.pagos.add(pago);
+      for (const aplicacion of aplicaciones) {
+        await db.aplicacionesPago.add(aplicacion);
+      }
+
+      for (const comprobante of entrada.comprobantes ?? []) {
+        const indice = (entrada.comprobantes ?? []).indexOf(comprobante);
+        await opciones.alInsertarComprobante?.(indice);
+        const registro: ComprobantePago = {
+          id: nuevoId(),
+          pagoId: pago.id,
+          imagen: comprobante.imagen,
+          mimeType: comprobante.mimeType,
+          ancho: comprobante.ancho,
+          alto: comprobante.alto,
+          sha256: comprobante.sha256,
+          subidoEn: new Date().toISOString(),
+        };
+        await db.comprobantesPago.add(registro);
+      }
+
+      for (const { obligacion } of aplicacionesCalculadas) {
+        const pagado =
+          obligacion.pagadoCentimos +
+          (nuevosPorObligacion.get(obligacion.id) ?? 0);
+        const saldo = Math.max(0, obligacion.montoCentimos - pagado);
+        const estado =
+          saldo <= 0
+            ? obligacion.tipo === 'PRESTAMO'
+              ? 'PAGADA'
+              : 'PAGADO'
+            : pagado > 0
+              ? 'PARCIAL'
+              : obligacion.tipo === 'PRESTAMO'
+                ? 'PENDIENTE'
+                : 'PENDIENTE';
+        if (obligacion.tipo === 'PRESTAMO') {
+          await db.cuotasPrestamo.update(obligacion.id, {
+            estado: estado as 'PENDIENTE' | 'PARCIAL' | 'PAGADA',
+          });
+        } else {
+          await db.cargosSuscripcion.update(obligacion.id, {
+            estado: estado as 'PENDIENTE' | 'PARCIAL' | 'PAGADO',
+          });
+        }
+      }
+
+      const prestamosAfectados = new Set(
+        aplicacionesCalculadas
+          .filter((a) => a.obligacion.tipo === 'PRESTAMO')
+          .map((a) => a.obligacion.id),
+      );
+      if (prestamosAfectados.size > 0) {
+        const cuotasAfectadas = await db.cuotasPrestamo
+          .where('id')
+          .anyOf([...prestamosAfectados])
+          .toArray();
+        const idsPrestamos = new Set(
+          cuotasAfectadas.map((c) => c.prestamoId),
+        );
+        for (const prestamoId of idsPrestamos) {
+          const prestamo = await db.prestamos.get(prestamoId);
+          if (!prestamo || prestamo.estado !== 'ACTIVO') continue;
+          const cuotas = await db.cuotasPrestamo
+            .where('prestamoId')
+            .equals(prestamoId)
+            .toArray();
+          const todasPagadas = cuotas.every((cuota) => {
+            const pagado =
+              pagadoDeCuota(aux, cuota.id) +
+              (nuevosPorObligacion.get(cuota.id) ?? 0);
+            return pagado >= cuota.montoProgramadoCentimos;
+          });
+          if (todasPagadas) {
+            await db.prestamos.update(prestamoId, {
+              estado: 'CANCELADO',
+              fechaEstado: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      await auditar(db, {
+        entidad: 'PAGO',
+        entidadId: pago.id,
+        accion: 'CREAR',
+        despues: {
+          pago,
+          aplicaciones: aplicaciones.length,
+          remanenteCentimos: montoCentimos - sumaAplicada,
+        },
+      });
+    },
+  );
+
+  return {
+    pago,
+    aplicaciones,
+    remanenteCentimos: montoCentimos - sumaAplicada,
+    obligaciones,
+  };
+}
