@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/baseDatos';
 import {
+  ajustarCuota,
+  cambiarCumplimiento,
   crearPrestamo,
   crearPrestamoConPersonaNueva,
   cuotasDePrestamo,
@@ -47,6 +49,15 @@ export function Prestamos() {
     prestamo: PrestamoListado;
     cuotas: CuotaPrestamo[];
   } | null>(null);
+  const [ajuste, setAjuste] = useState<{
+    cuotaId: string;
+    numero: number;
+    monto: string;
+    motivo: string;
+    redistribucion: 'EQUITATIVA' | 'ULTIMA';
+  } | null>(null);
+  const [errorAjuste, setErrorAjuste] = useState<string | null>(null);
+  const [mensajeAjuste, setMensajeAjuste] = useState<string | null>(null);
 
   const personas = useLiveQuery(
     () =>
@@ -150,6 +161,48 @@ export function Prestamos() {
       prestamo,
       cuotas: await cuotasDePrestamo(db, prestamo.id),
     });
+  }
+
+  async function guardarAjuste() {
+    if (!ajuste || !seleccion) return;
+    setErrorAjuste(null);
+    setMensajeAjuste(null);
+    try {
+      await ajustarCuota(db, ajuste.cuotaId, {
+        nuevoMonto: ajuste.monto,
+        motivo: ajuste.motivo,
+        redistribucion: ajuste.redistribucion,
+      });
+      setMensajeAjuste('Cuota ajustada y total del préstamo conservado.');
+      setAjuste(null);
+      setSeleccion({
+        ...seleccion,
+        cuotas: await cuotasDePrestamo(db, seleccion.prestamo.id),
+      });
+    } catch (fallo) {
+      setErrorAjuste(mensajeDeError(fallo));
+    }
+  }
+
+  async function alternarTipo() {
+    if (!seleccion) return;
+    setErrorAjuste(null);
+    try {
+      const actualizado = await cambiarCumplimiento(
+        db,
+        seleccion.prestamo.id,
+        !seleccion.prestamo.estrictoCumplimiento,
+      );
+      setSeleccion({
+        ...seleccion,
+        prestamo: { ...seleccion.prestamo, ...actualizado },
+      });
+      setMensajeAjuste(
+        `Ahora el préstamo es ${actualizado.estrictoCumplimiento ? 'estricto' : 'flexible'}.`,
+      );
+    } catch (fallo) {
+      setErrorAjuste(mensajeDeError(fallo));
+    }
   }
 
   return (
@@ -536,13 +589,25 @@ export function Prestamos() {
         <article className="tarjeta">
           <div className="encabezado-tarjeta">
             <h2>Cronograma de {seleccion.prestamo.persona}</h2>
-            <button
-              className="boton boton-secundario boton-pequeno"
-              type="button"
-              onClick={() => setSeleccion(null)}
-            >
-              Cerrar
-            </button>
+            <div className="acciones">
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                onClick={() => void alternarTipo()}
+              >
+                Cambiar a{' '}
+                {seleccion.prestamo.estrictoCumplimiento
+                  ? 'flexible'
+                  : 'estricto'}
+              </button>
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                onClick={() => setSeleccion(null)}
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
           <dl className="detalle-lista">
             <div>
@@ -581,6 +646,7 @@ export function Prestamos() {
                   <th className="numero">Interés</th>
                   <th className="numero">Cuota</th>
                   <th>Estado</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -619,11 +685,105 @@ export function Prestamos() {
                         {cuota.estado}
                       </Etiqueta>
                     </td>
+                    <td>
+                      {!seleccion.prestamo.estrictoCumplimiento &&
+                      cuota.estado !== 'PAGADA' ? (
+                        <button
+                          className="boton boton-secundario boton-pequeno"
+                          type="button"
+                          onClick={() => {
+                            setAjuste({
+                              cuotaId: cuota.id,
+                              numero: cuota.numeroCuota,
+                              monto: (
+                                cuota.montoProgramadoCentimos / 100
+                              ).toFixed(2),
+                              motivo: '',
+                              redistribucion: 'EQUITATIVA',
+                            });
+                            setErrorAjuste(null);
+                            setMensajeAjuste(null);
+                          }}
+                        >
+                          Ajustar
+                        </button>
+                      ) : (
+                        <span className="nota">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {ajuste ? (
+            <div style={{ marginTop: '0.9rem' }}>
+              <h3>Ajustar cuota {ajuste.numero}</h3>
+              <div className="formulario">
+                <Campo etiqueta="Nuevo monto">
+                  <input
+                    inputMode="decimal"
+                    value={ajuste.monto}
+                    onChange={(e) =>
+                      setAjuste({ ...ajuste, monto: e.target.value })
+                    }
+                  />
+                </Campo>
+                <Campo etiqueta="Redistribuir en">
+                  <select
+                    value={ajuste.redistribucion}
+                    onChange={(e) =>
+                      setAjuste({
+                        ...ajuste,
+                        redistribucion: e.target.value as
+                          | 'EQUITATIVA'
+                          | 'ULTIMA',
+                      })
+                    }
+                  >
+                    <option value="EQUITATIVA">Cuotas posteriores</option>
+                    <option value="ULTIMA">Última cuota</option>
+                  </select>
+                </Campo>
+                <Campo etiqueta="Motivo *">
+                  <input
+                    value={ajuste.motivo}
+                    onChange={(e) =>
+                      setAjuste({ ...ajuste, motivo: e.target.value })
+                    }
+                  />
+                </Campo>
+                <div className="acciones">
+                  <button
+                    className="boton boton-primario boton-pequeno"
+                    type="button"
+                    onClick={() => void guardarAjuste()}
+                  >
+                    Guardar ajuste
+                  </button>
+                  <button
+                    className="boton boton-secundario boton-pequeno"
+                    type="button"
+                    onClick={() => setAjuste(null)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {errorAjuste ? (
+            <div style={{ marginTop: '0.7rem' }}>
+              <Aviso tipo="error">{errorAjuste}</Aviso>
+            </div>
+          ) : null}
+          {mensajeAjuste ? (
+            <div style={{ marginTop: '0.7rem' }}>
+              <Aviso tipo="exito">{mensajeAjuste}</Aviso>
+            </div>
+          ) : null}
         </article>
       ) : null}
     </section>
