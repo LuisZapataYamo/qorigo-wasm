@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Disposicion } from './ui/Disposicion';
 import { Inicio } from './ui/paginas/Inicio';
 import { EnConstruccion } from './ui/paginas/EnConstruccion';
+import { Personas } from './ui/paginas/Personas';
 
 export function App() {
   return (
@@ -9,10 +10,7 @@ export function App() {
       <Routes>
         <Route element={<Disposicion />}>
           <Route index element={<Inicio />} />
-          <Route
-            path="personas"
-            element={<EnConstruccion titulo="Personas" caso="CU-01 y CU-02" />}
-          />
+          <Route path="personas" element={<Personas />} />
           <Route
             path="suscripciones"
             element={
