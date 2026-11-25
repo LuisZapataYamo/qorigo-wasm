@@ -720,3 +720,135 @@ export function suscripcionesACsv(lineas: LineaSuscripcion[]): string {
     })),
   );
 }
+
+/* ------------------------------- CU-19 ------------------------------- */
+
+export interface LineaPrestamo {
+  prestamoId: string;
+  personaId: string;
+  persona: string;
+  moneda: string;
+  estado: string;
+  estrictoCumplimiento: boolean;
+  capitalCentimos: number;
+  totalProgramadoCentimos: number;
+  totalCobradoCentimos: number;
+  capitalRecuperadoCentimos: number;
+  interesCobradoCentimos: number;
+  saldoPendienteCentimos: number;
+  saldoVencidoCentimos: number;
+  diasMaxAtraso: number;
+  resultadoCentimos: number;
+  perdidaNetaCentimos: number;
+  marca: 'EN_RIESGO' | 'EN_PERDIDA' | null;
+}
+
+function lineaPrestamo(
+  ctx: ContextoReportes,
+  prestamo: Prestamo,
+): LineaPrestamo {
+  const cuotas = ctx.cuotas.filter((c) => c.prestamoId === prestamo.id);
+  const ids = new Set(cuotas.map((c) => c.id));
+  const aplicaciones = ctx.aplicaciones.filter(
+    (a) => a.cuotaId && ids.has(a.cuotaId) && ctx.aux.pagosRegistrados.has(a.pagoId),
+  );
+  const totalCobrado = aplicaciones.reduce(
+    (t, a) => t + a.montoAplicadoCentimos,
+    0,
+  );
+  const capitalRecuperado = aplicaciones.reduce(
+    (t, a) => t + (a.montoCapitalCentimos ?? 0),
+    0,
+  );
+  const interesCobrado = aplicaciones.reduce(
+    (t, a) => t + (a.montoInteresCentimos ?? 0),
+    0,
+  );
+  const totalProgramado = cuotas.reduce(
+    (t, c) => t + c.montoProgramadoCentimos,
+    0,
+  );
+  let saldoPendiente = 0;
+  let saldoVencido = 0;
+  let diasMaxAtraso = 0;
+  for (const cuota of cuotas) {
+    const pagado = pagadoCuota(ctx, cuota.id);
+    const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
+    saldoPendiente += saldo;
+    if (saldo > 0 && cuota.fechaVencimiento < ctx.hoy) {
+      saldoVencido += saldo;
+      diasMaxAtraso = Math.max(
+        diasMaxAtraso,
+        diasEntre(cuota.fechaVencimiento, ctx.hoy),
+      );
+    }
+  }
+
+  const perdidaNeta =
+    prestamo.estado === 'INCOBRABLE'
+      ? Math.max(0, prestamo.capitalCentimos - totalCobrado)
+      : 0;
+  const marca: LineaPrestamo['marca'] =
+    prestamo.estado === 'INCOBRABLE'
+      ? 'EN_PERDIDA'
+      : prestamo.estado === 'ACTIVO' &&
+          saldoVencido > 0 &&
+          diasMaxAtraso > ctx.umbralRiesgo
+        ? 'EN_RIESGO'
+        : null;
+
+  const persona = ctx.mapaPersonas.get(prestamo.personaId);
+
+  return {
+    prestamoId: prestamo.id,
+    personaId: prestamo.personaId,
+    persona: persona ? `${persona.apellidos}, ${persona.nombres}` : '—',
+    moneda: prestamo.moneda,
+    estado: prestamo.estado,
+    estrictoCumplimiento: prestamo.estrictoCumplimiento,
+    capitalCentimos: prestamo.capitalCentimos,
+    totalProgramadoCentimos: totalProgramado,
+    totalCobradoCentimos: totalCobrado,
+    capitalRecuperadoCentimos: capitalRecuperado,
+    interesCobradoCentimos: interesCobrado,
+    saldoPendienteCentimos: saldoPendiente,
+    saldoVencidoCentimos: saldoVencido,
+    diasMaxAtraso,
+    resultadoCentimos: totalCobrado - prestamo.capitalCentimos,
+    perdidaNetaCentimos: perdidaNeta,
+    marca,
+  };
+}
+
+export async function informePrestamos(
+  db: BaseDatos,
+  moneda?: string,
+): Promise<LineaPrestamo[]> {
+  const ctx = await cargarContexto(db);
+  return ctx.prestamos
+    .filter((p) => p.estado !== 'ANULADO')
+    .filter((p) => (moneda ? p.moneda === moneda : true))
+    .map((prestamo) => lineaPrestamo(ctx, prestamo))
+    .sort((a, b) => a.persona.localeCompare(b.persona, 'es'));
+}
+
+export function prestamosACsv(lineas: LineaPrestamo[]): string {
+  return aCsv(
+    lineas.map((linea) => ({
+      persona: linea.persona,
+      moneda: linea.moneda,
+      estado: linea.estado,
+      capital: (linea.capitalCentimos / 100).toFixed(2),
+      programado: (linea.totalProgramadoCentimos / 100).toFixed(2),
+      cobrado: (linea.totalCobradoCentimos / 100).toFixed(2),
+      capital_recuperado: (linea.capitalRecuperadoCentimos / 100).toFixed(2),
+      interes_cobrado: (linea.interesCobradoCentimos / 100).toFixed(2),
+      saldo_pendiente: (linea.saldoPendienteCentimos / 100).toFixed(2),
+      saldo_vencido: (linea.saldoVencidoCentimos / 100).toFixed(2),
+      dias_atraso: linea.diasMaxAtraso,
+      resultado: (linea.resultadoCentimos / 100).toFixed(2),
+      perdida_neta: (linea.perdidaNetaCentimos / 100).toFixed(2),
+      marca: linea.marca ?? '',
+    })),
+  );
+}
