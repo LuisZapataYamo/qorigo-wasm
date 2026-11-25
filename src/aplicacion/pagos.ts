@@ -190,7 +190,15 @@ export async function registrarPago(
       'comprobantes',
     );
   }
+  const shasDelPago = new Set<string>();
   for (const comprobante of comprobantes) {
+    if (shasDelPago.has(comprobante.sha256)) {
+      throw new ErrorValidacion(
+        'El mismo comprobante está repetido en este pago.',
+        'comprobantes',
+      );
+    }
+    shasDelPago.add(comprobante.sha256);
     const duplicado = await db.comprobantesPago
       .where('sha256')
       .equals(comprobante.sha256)

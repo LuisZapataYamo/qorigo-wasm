@@ -1,6 +1,6 @@
 import { aCentimos } from './dinero';
 import { ErrorValidacion } from './errores';
-import { sumarMeses } from './fechas';
+import { esFechaValida, sumarMeses } from './fechas';
 
 export interface CuotaCalculada {
   numero: number;
@@ -53,7 +53,7 @@ export function calcularCronograma(
       'plazoMeses',
     );
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(entrada.fechaPrimerPago)) {
+  if (!esFechaValida(entrada.fechaPrimerPago)) {
     throw new ErrorValidacion(
       'La fecha del primer pago no es válida.',
       'fechaPrimerPago',
