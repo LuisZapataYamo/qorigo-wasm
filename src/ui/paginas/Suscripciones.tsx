@@ -9,9 +9,12 @@ import {
   type DetalleSuscripcion,
 } from '../../aplicacion/suscripciones';
 import {
+  actualizarMiembro,
   agregarMiembro,
   agregarMiembroConPersonaNueva,
+  darDeBajaMiembro,
   listarMiembros,
+  reactivarMiembro,
 } from '../../aplicacion/miembros';
 import { mensajeDeError } from '../../dominio/errores';
 import { formatearMoneda } from '../../dominio/dinero';
@@ -55,6 +58,13 @@ export function Suscripciones() {
   const [miembroError, setMiembroError] = useState<string | null>(null);
   const [miembroMensaje, setMiembroMensaje] = useState<string | null>(null);
   const [similaresMiembro, setSimilaresMiembro] = useState<Persona[]>([]);
+  const [miembroEditando, setMiembroEditando] = useState<{
+    id: string;
+    nombre: string;
+    monto: string;
+    fechaFin: string;
+    estado: string;
+  } | null>(null);
 
   const plataformas = useLiveQuery(
     () => db.plataformas.toArray().then((p) => p.filter((x) => x.activo)),
@@ -175,8 +185,7 @@ export function Suscripciones() {
 
   async function sumarMiembro(
     resolucion?: 'crear' | 'reutilizar',
-  ) {
-    if (!detalle) return;
+  ) {    if (!detalle) return;
     setMiembroError(null);
     setMiembroMensaje(null);
     try {
@@ -226,6 +235,60 @@ export function Suscripciones() {
         propia: false,
       }));
       setDetalle(await detalleSuscripcion(db, detalle.suscripcion.id));
+    } catch (fallo) {
+      setMiembroError(mensajeDeError(fallo));
+    }
+  }
+
+  async function refrescarDetalle() {
+    if (detalle) setDetalle(await detalleSuscripcion(db, detalle.suscripcion.id));
+  }
+
+  async function guardarMontoMiembro() {
+    if (!miembroEditando) return;
+    setMiembroError(null);
+    setMiembroMensaje(null);
+    try {
+      await actualizarMiembro(db, miembroEditando.id, {
+        montoAcordado: miembroEditando.monto,
+      });
+      setMiembroMensaje(
+        'Monto actualizado. Los cargos ya generados no cambian.',
+      );
+      await refrescarDetalle();
+    } catch (fallo) {
+      setMiembroError(mensajeDeError(fallo));
+    }
+  }
+
+  async function darBaja() {
+    if (!miembroEditando) return;
+    setMiembroError(null);
+    setMiembroMensaje(null);
+    try {
+      await darDeBajaMiembro(
+        db,
+        miembroEditando.id,
+        miembroEditando.fechaFin,
+      );
+      setMiembroMensaje(
+        'Membresía dada de baja. Los cargos pendientes se conservan.',
+      );
+      setMiembroEditando({ ...miembroEditando, estado: 'INACTIVO' });
+      await refrescarDetalle();
+    } catch (fallo) {
+      setMiembroError(mensajeDeError(fallo));
+    }
+  }
+
+  async function reactivar() {
+    if (!miembroEditando) return;
+    setMiembroError(null);
+    try {
+      await reactivarMiembro(db, miembroEditando.id);
+      setMiembroEditando({ ...miembroEditando, estado: 'ACTIVO' });
+      setMiembroMensaje('Membresía reactivada.');
+      await refrescarDetalle();
     } catch (fallo) {
       setMiembroError(mensajeDeError(fallo));
     }
@@ -492,6 +555,7 @@ export function Suscripciones() {
                     <th>Plaza</th>
                     <th>Inicio</th>
                     <th>Estado</th>
+                    <th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -521,12 +585,102 @@ export function Suscripciones() {
                           {miembro.estado}
                         </Etiqueta>
                       </td>
+                      <td>
+                        <button
+                          className="boton boton-secundario boton-pequeno"
+                          type="button"
+                          onClick={() =>
+                            setMiembroEditando({
+                              id: miembro.id,
+                              nombre: nombreCompleto(
+                                persona.nombres,
+                                persona.apellidos,
+                              ),
+                              monto: (miembro.montoAcordadoCentimos / 100).toFixed(
+                                2,
+                              ),
+                              fechaFin: miembro.fechaFin ?? hoy(),
+                              estado: miembro.estado,
+                            })
+                          }
+                        >
+                          Editar
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+
+          {miembroEditando ? (
+            <div style={{ marginTop: '0.8rem' }}>
+              <h3>Editar miembro: {miembroEditando.nombre}</h3>
+              <div className="formulario">
+                <Campo
+                  etiqueta="Monto acordado"
+                  ayuda="Rige desde el siguiente periodo generado."
+                >
+                  <input
+                    inputMode="decimal"
+                    value={miembroEditando.monto}
+                    onChange={(e) =>
+                      setMiembroEditando({
+                        ...miembroEditando,
+                        monto: e.target.value,
+                      })
+                    }
+                  />
+                </Campo>
+                <Campo etiqueta="Fecha de baja">
+                  <input
+                    type="date"
+                    value={miembroEditando.fechaFin}
+                    onChange={(e) =>
+                      setMiembroEditando({
+                        ...miembroEditando,
+                        fechaFin: e.target.value,
+                      })
+                    }
+                  />
+                </Campo>
+                <div className="acciones">
+                  <button
+                    className="boton boton-primario boton-pequeno"
+                    type="button"
+                    onClick={() => void guardarMontoMiembro()}
+                  >
+                    Guardar monto
+                  </button>
+                  {miembroEditando.estado === 'ACTIVO' ? (
+                    <button
+                      className="boton boton-peligro boton-pequeno"
+                      type="button"
+                      onClick={() => void darBaja()}
+                    >
+                      Dar de baja
+                    </button>
+                  ) : (
+                    <button
+                      className="boton boton-secundario boton-pequeno"
+                      type="button"
+                      onClick={() => void reactivar()}
+                    >
+                      Reactivar
+                    </button>
+                  )}
+                  <button
+                    className="boton boton-secundario boton-pequeno"
+                    type="button"
+                    onClick={() => setMiembroEditando(null)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <hr className="separador" />
           <h3>Agregar miembro</h3>
