@@ -3,13 +3,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/baseDatos';
 import {
   ajustarCuota,
+  anularPrestamo,
   cambiarCumplimiento,
   crearPrestamo,
   crearPrestamoConPersonaNueva,
   cuotasDePrestamo,
   listarPrestamos,
+  marcarIncobrable,
+  resumenPrestamo,
   simularPrestamo,
   type PrestamoListado,
+  type ResumenPrestamo,
   type SimulacionPrestamo,
 } from '../../aplicacion/prestamos';
 import { formatearMoneda } from '../../dominio/dinero';
@@ -58,6 +62,7 @@ export function Prestamos() {
   } | null>(null);
   const [errorAjuste, setErrorAjuste] = useState<string | null>(null);
   const [mensajeAjuste, setMensajeAjuste] = useState<string | null>(null);
+  const [resumen, setResumen] = useState<ResumenPrestamo | null>(null);
 
   const personas = useLiveQuery(
     () =>
@@ -161,6 +166,57 @@ export function Prestamos() {
       prestamo,
       cuotas: await cuotasDePrestamo(db, prestamo.id),
     });
+    setResumen(await resumenPrestamo(db, prestamo.id));
+  }
+
+  async function refrescarSeleccion() {
+    if (!seleccion) return;
+    const listado = (await listarPrestamos(db)).find(
+      (p) => p.id === seleccion.prestamo.id,
+    );
+    if (listado) {
+      setSeleccion({
+        prestamo: listado,
+        cuotas: await cuotasDePrestamo(db, listado.id),
+      });
+    }
+    setResumen(await resumenPrestamo(db, seleccion.prestamo.id));
+  }
+
+  async function marcarComoIncobrable() {
+    if (!seleccion) return;
+    setErrorAjuste(null);
+    setMensajeAjuste(null);
+    const motivo = window.prompt('Motivo del préstamo incobrable:');
+    if (!motivo) return;
+    try {
+      await marcarIncobrable(db, seleccion.prestamo.id, motivo);
+      setMensajeAjuste('El préstamo quedó marcado como incobrable.');
+      await refrescarSeleccion();
+    } catch (fallo) {
+      setErrorAjuste(mensajeDeError(fallo));
+    }
+  }
+
+  async function anular() {
+    if (!seleccion) return;
+    setErrorAjuste(null);
+    setMensajeAjuste(null);
+    if (
+      !window.confirm(
+        '¿Anular el préstamo? Solo se permite si no tiene pagos activos.',
+      )
+    ) {
+      return;
+    }
+    const motivo = window.prompt('Motivo de la anulación:') ?? undefined;
+    try {
+      await anularPrestamo(db, seleccion.prestamo.id, motivo);
+      setMensajeAjuste('El préstamo quedó anulado.');
+      await refrescarSeleccion();
+    } catch (fallo) {
+      setErrorAjuste(mensajeDeError(fallo));
+    }
   }
 
   async function guardarAjuste() {
@@ -590,6 +646,24 @@ export function Prestamos() {
           <div className="encabezado-tarjeta">
             <h2>Cronograma de {seleccion.prestamo.persona}</h2>
             <div className="acciones">
+              {seleccion.prestamo.estado === 'ACTIVO' ? (
+                <button
+                  className="boton boton-peligro boton-pequeno"
+                  type="button"
+                  onClick={() => void marcarComoIncobrable()}
+                >
+                  Marcar incobrable
+                </button>
+              ) : null}
+              {seleccion.prestamo.estado !== 'ANULADO' ? (
+                <button
+                  className="boton boton-peligro boton-pequeno"
+                  type="button"
+                  onClick={() => void anular()}
+                >
+                  Anular
+                </button>
+              ) : null}
               <button
                 className="boton boton-secundario boton-pequeno"
                 type="button"
@@ -636,6 +710,51 @@ export function Prestamos() {
               </dd>
             </div>
           </dl>
+
+          {resumen ? (
+            <dl className="detalle-lista" style={{ marginTop: '0.6rem' }}>
+              <div>
+                <dt>Cobrado</dt>
+                <dd>
+                  {formatearMoneda(
+                    resumen.totalCobradoCentimos,
+                    seleccion.prestamo.moneda,
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Saldo pendiente</dt>
+                <dd>
+                  {formatearMoneda(
+                    resumen.saldoPendienteCentimos,
+                    seleccion.prestamo.moneda,
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Saldo vencido</dt>
+                <dd>
+                  {formatearMoneda(
+                    resumen.saldoVencidoCentimos,
+                    seleccion.prestamo.moneda,
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Resultado</dt>
+                <dd>
+                  {formatearMoneda(
+                    resumen.resultadoCentimos,
+                    seleccion.prestamo.moneda,
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Marca</dt>
+                <dd>{resumen.marca ?? 'Sin marca'}</dd>
+              </div>
+            </dl>
+          ) : null}
           <div className="tabla-contenedor" style={{ marginTop: '0.8rem' }}>
             <table className="tabla">
               <thead>

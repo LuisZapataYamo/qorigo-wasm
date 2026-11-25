@@ -8,6 +8,7 @@ import {
   ErrorValidacion,
 } from '../dominio/errores';
 import { esFechaValida, finDeMes, periodoActual, sumarMeses } from '../dominio/fechas';
+import { diasEntre, hoy } from '../dominio/fechas';
 import { nuevoId } from '../dominio/ids';
 import {
   calcularCronograma,
@@ -19,7 +20,7 @@ import {
   type EntradaPersona,
   type ResolucionSimilar,
 } from './personas';
-import { cargarAuxiliaresSaldos, pagadoDeCuota } from './saldos';
+import { cargarAuxiliaresSaldos, pagadoDeCuota, aplicacionesDeCuota } from './saldos';
 
 export type SimulacionPrestamo = CronogramaCalculado & {
   tasaMensual: number;
@@ -496,5 +497,187 @@ export async function exigibleDelMes(
     atrasadoNoAcumuladoCentimos: prestamo.estrictoCumplimiento
       ? 0
       : saldoAnterior,
+  };
+}
+
+/* ------------------------------- CU-11 ------------------------------- */
+
+export async function marcarIncobrable(
+  db: BaseDatos,
+  prestamoId: string,
+  motivo: string,
+  usuarioId?: string,
+): Promise<Prestamo> {
+  const prestamo = await obtenerPrestamo(db, prestamoId);
+  const texto = motivo?.trim() ?? '';
+  if (!texto) {
+    throw new ErrorValidacion('El motivo es obligatorio.', 'motivo');
+  }
+  if (prestamo.estado !== 'ACTIVO') {
+    throw new ErrorReglaNegocio(
+      'Solo un préstamo activo puede marcarse como incobrable.',
+    );
+  }
+
+  const actualizado: Prestamo = {
+    ...prestamo,
+    estado: 'INCOBRABLE',
+    motivoEstado: texto,
+    fechaEstado: new Date().toISOString(),
+  };
+
+  await db.transaction('rw', db.prestamos, db.auditoria, async () => {
+    await db.prestamos.put(actualizado);
+    await auditar(db, {
+      entidad: 'PRESTAMO',
+      entidadId: prestamoId,
+      accion: 'MARCAR_INCOBRABLE',
+      usuarioId,
+      antes: { estado: prestamo.estado },
+      despues: { estado: actualizado.estado, motivo: texto },
+    });
+  });
+
+  return actualizado;
+}
+
+export async function anularPrestamo(
+  db: BaseDatos,
+  prestamoId: string,
+  motivo?: string,
+  usuarioId?: string,
+): Promise<Prestamo> {
+  const prestamo = await obtenerPrestamo(db, prestamoId);
+  if (prestamo.estado === 'ANULADO') {
+    throw new ErrorReglaNegocio('El préstamo ya está anulado.');
+  }
+
+  const aux = await cargarAuxiliaresSaldos(db);
+  const cuotas = await cuotasDePrestamo(db, prestamo.id);
+  const tienePagos = cuotas.some((cuota) =>
+    aux.aplicaciones.some(
+      (a) => a.cuotaId === cuota.id && aux.pagosRegistrados.has(a.pagoId),
+    ),
+  );
+  if (tienePagos) {
+    throw new ErrorReglaNegocio(
+      'No se puede anular un préstamo con pagos activos.',
+    );
+  }
+
+  const actualizado: Prestamo = {
+    ...prestamo,
+    estado: 'ANULADO',
+    motivoEstado: motivo?.trim() || undefined,
+    fechaEstado: new Date().toISOString(),
+  };
+
+  await db.transaction('rw', db.prestamos, db.auditoria, async () => {
+    await db.prestamos.put(actualizado);
+    await auditar(db, {
+      entidad: 'PRESTAMO',
+      entidadId: prestamoId,
+      accion: 'ANULAR',
+      usuarioId,
+      antes: { estado: prestamo.estado },
+      despues: { estado: actualizado.estado, motivo: actualizado.motivoEstado },
+    });
+  });
+
+  return actualizado;
+}
+
+export interface ResumenPrestamo {
+  prestamoId: string;
+  capitalCentimos: number;
+  totalProgramadoCentimos: number;
+  totalCobradoCentimos: number;
+  capitalRecuperadoCentimos: number;
+  interesCobradoCentimos: number;
+  saldoPendienteCentimos: number;
+  saldoVencidoCentimos: number;
+  diasMaxAtraso: number;
+  resultadoCentimos: number;
+  perdidaNetaCentimos: number;
+  marca: 'EN_RIESGO' | 'EN_PERDIDA' | null;
+}
+
+export async function resumenPrestamo(
+  db: BaseDatos,
+  prestamoId: string,
+): Promise<ResumenPrestamo> {
+  const prestamo = await obtenerPrestamo(db, prestamoId);
+  const cuotas = await cuotasDePrestamo(db, prestamo.id);
+  const aux = await cargarAuxiliaresSaldos(db);
+  const umbral = Number(
+    (await db.configuracion.get('umbral_riesgo_dias'))?.valor ?? '30',
+  );
+  const hoyTexto = hoy();
+
+  let totalProgramado = 0;
+  let totalCobrado = 0;
+  let saldoPendiente = 0;
+  let saldoVencido = 0;
+  let diasMaxAtraso = 0;
+
+  for (const cuota of cuotas) {
+    totalProgramado += cuota.montoProgramadoCentimos;
+    const aplicaciones = aplicacionesDeCuota(aux, cuota.id);
+    const pagado = aplicaciones.reduce(
+      (t, a) => t + a.montoAplicadoCentimos,
+      0,
+    );
+    const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
+    totalCobrado += pagado;
+    saldoPendiente += saldo;
+    if (saldo > 0 && cuota.fechaVencimiento < hoyTexto) {
+      saldoVencido += saldo;
+      diasMaxAtraso = Math.max(
+        diasMaxAtraso,
+        diasEntre(cuota.fechaVencimiento, hoyTexto),
+      );
+    }
+  }
+
+  const idsCuotas = new Set(cuotas.map((c) => c.id));
+  const aplicacionesDelPrestamo = aux.aplicaciones.filter(
+    (a) => a.cuotaId && idsCuotas.has(a.cuotaId),
+  );
+  const capitalRecuperado = aplicacionesDelPrestamo.reduce(
+    (total, a) => total + (a.montoCapitalCentimos ?? 0),
+    0,
+  );
+  const interesCobrado = aplicacionesDelPrestamo.reduce(
+    (total, a) => total + (a.montoInteresCentimos ?? 0),
+    0,
+  );
+
+  const perdidaNeta =
+    prestamo.estado === 'INCOBRABLE'
+      ? Math.max(0, prestamo.capitalCentimos - totalCobrado)
+      : 0;
+
+  const marca: ResumenPrestamo['marca'] =
+    prestamo.estado === 'INCOBRABLE'
+      ? 'EN_PERDIDA'
+      : prestamo.estado === 'ACTIVO' &&
+          saldoVencido > 0 &&
+          diasMaxAtraso > umbral
+        ? 'EN_RIESGO'
+        : null;
+
+  return {
+    prestamoId,
+    capitalCentimos: prestamo.capitalCentimos,
+    totalProgramadoCentimos: totalProgramado,
+    totalCobradoCentimos: totalCobrado,
+    capitalRecuperadoCentimos: capitalRecuperado,
+    interesCobradoCentimos: interesCobrado,
+    saldoPendienteCentimos: saldoPendiente,
+    saldoVencidoCentimos: saldoVencido,
+    diasMaxAtraso,
+    resultadoCentimos: totalCobrado - prestamo.capitalCentimos,
+    perdidaNetaCentimos: perdidaNeta,
+    marca,
   };
 }
