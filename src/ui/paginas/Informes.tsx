@@ -5,7 +5,9 @@ import {
   DEFINICIONES,
   dashboard,
   informePerdidasSuscripciones,
+  informePrestamos,
   informeSuscripciones,
+  prestamosACsv,
   suscripcionesACsv,
 } from '../../aplicacion/reportes';
 import { formatearMoneda } from '../../dominio/dinero';
@@ -43,6 +45,10 @@ export function Informes() {
   const perdidasSuscripciones = useLiveQuery(
     () => informePerdidasSuscripciones(db, periodo, moneda),
     [periodo, moneda],
+  );
+  const prestamos = useLiveQuery(
+    () => informePrestamos(db, moneda),
+    [moneda],
   );
 
   return (
@@ -467,6 +473,103 @@ export function Informes() {
                 </div>
               ))
             )}
+          </article>
+
+          <article className="tarjeta">
+            <div className="encabezado-tarjeta">
+              <h2>Préstamos</h2>
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                disabled={!prestamos || prestamos.length === 0}
+                onClick={() =>
+                  descargarCsv(
+                    `prestamos-${moneda}.csv`,
+                    prestamosACsv(prestamos ?? []),
+                  )
+                }
+              >
+                Exportar CSV
+              </button>
+            </div>
+            {(prestamos ?? []).length === 0 ? (
+              <p className="nota">No hay préstamos registrados.</p>
+            ) : (
+              <div className="tabla-contenedor">
+                <table className="tabla">
+                  <thead>
+                    <tr>
+                      <th>Persona</th>
+                      <th>Estado</th>
+                      <th className="numero">Capital</th>
+                      <th className="numero">Cobrado</th>
+                      <th className="numero">Capital recup.</th>
+                      <th className="numero">Interés</th>
+                      <th className="numero">Saldo</th>
+                      <th className="numero">Vencido</th>
+                      <th className="numero">Atraso</th>
+                      <th className="numero">Resultado</th>
+                      <th>Marca</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(prestamos ?? []).map((linea) => (
+                      <tr key={linea.prestamoId}>
+                        <td>{linea.persona}</td>
+                        <td>{linea.estado}</td>
+                        <td className="numero">
+                          {formatearMoneda(linea.capitalCentimos, moneda)}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(
+                            linea.totalCobradoCentimos,
+                            moneda,
+                          )}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(
+                            linea.capitalRecuperadoCentimos,
+                            moneda,
+                          )}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(
+                            linea.interesCobradoCentimos,
+                            moneda,
+                          )}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(
+                            linea.saldoPendienteCentimos,
+                            moneda,
+                          )}
+                        </td>
+                        <td className="numero">
+                          {formatearMoneda(linea.saldoVencidoCentimos, moneda)}
+                        </td>
+                        <td className="numero">{linea.diasMaxAtraso} d</td>
+                        <td className="numero">
+                          {formatearMoneda(linea.resultadoCentimos, moneda)}
+                        </td>
+                        <td>
+                          {linea.marca === 'EN_RIESGO' ? (
+                            <Etiqueta color="ambar">EN RIESGO</Etiqueta>
+                          ) : linea.marca === 'EN_PERDIDA' ? (
+                            <Etiqueta color="roja">EN PÉRDIDA</Etiqueta>
+                          ) : (
+                            <Etiqueta color="verde">—</Etiqueta>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="nota" style={{ marginTop: '0.5rem' }}>
+              Un resultado negativo en un préstamo activo significa que aún no
+              se recuperó el capital, no que sea pérdida.
+            </p>
           </article>
         </>
       )}
