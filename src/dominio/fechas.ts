@@ -91,6 +91,14 @@ export function diasEntre(desde: string, hasta: string): number {
   return Math.round((fin - inicio) / 86_400_000);
 }
 
+export function sumarDias(fecha: string, dias: number): string {
+  const { anio, mes, dia } = partes(fecha);
+  const destino = new Date(Date.UTC(anio, mes - 1, dia + dias));
+  return `${String(destino.getUTCFullYear()).padStart(4, '0')}-${String(
+    destino.getUTCMonth() + 1,
+  ).padStart(2, '0')}-${String(destino.getUTCDate()).padStart(2, '0')}`;
+}
+
 export function serieMeses(periodoFinal: string, cantidad: number): string[] {
   const meses: string[] = [];
   for (let i = cantidad - 1; i >= 0; i--) {

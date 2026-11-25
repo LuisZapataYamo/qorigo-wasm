@@ -6,6 +6,7 @@ import { Personas } from './ui/paginas/Personas';
 import { Suscripciones } from './ui/paginas/Suscripciones';
 import { Prestamos } from './ui/paginas/Prestamos';
 import { Pagos } from './ui/paginas/Pagos';
+import { Informes } from './ui/paginas/Informes';
 
 export function App() {
   return (
@@ -17,10 +18,7 @@ export function App() {
           <Route path="suscripciones" element={<Suscripciones />} />
           <Route path="prestamos" element={<Prestamos />} />
           <Route path="pagos" element={<Pagos />} />
-          <Route
-            path="informes"
-            element={<EnConstruccion titulo="Informes" caso="CU-17 a CU-21" />}
-          />
+          <Route path="informes" element={<Informes />} />
           <Route
             path="respaldo"
             element={<EnConstruccion titulo="Respaldo" caso="CU-25 y CU-26" />}
