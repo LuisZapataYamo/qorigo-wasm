@@ -5,10 +5,13 @@ import {
   obtenerObligacionesPendientes,
   registrarPago,
 } from '../../aplicacion/pagos';
+import {
+  procesarComprobante,
+  type ComprobanteProcesado,
+} from '../../aplicacion/comprobantes';
 import { aCentimos, aSoles, formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy } from '../../dominio/fechas';
-import { mensajeDeError } from '../../dominio/errores';
-import { nombreCompleto } from '../../dominio/nombres';
+import { ErrorConflicto, mensajeDeError } from '../../dominio/errores';import { nombreCompleto } from '../../dominio/nombres';
 import type { ObligacionPendiente, TipoObligacion } from '../../db/tipos';
 import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
 
@@ -25,6 +28,8 @@ export function Pagos() {
   const [error, setError] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [refresco, setRefresco] = useState(0);
+  const [comprobantes, setComprobantes] = useState<ComprobanteProcesado[]>([]);
+  const [procesandoImagen, setProcesandoImagen] = useState(false);
 
   const personas = useLiveQuery(
     () =>
@@ -81,6 +86,32 @@ export function Pagos() {
     setReparto(nuevo);
   }
 
+  async function agregarComprobantes(archivos: FileList | null) {
+    if (!archivos || archivos.length === 0) return;
+    setError(null);
+    setProcesandoImagen(true);
+    try {
+      const nuevos = [...comprobantes];
+      for (const archivo of Array.from(archivos)) {
+        if (nuevos.length >= 3) {
+          setError('Se permiten como máximo 3 comprobantes por pago.');
+          break;
+        }
+        const procesado = await procesarComprobante(archivo);
+        if (!nuevos.some((c) => c.sha256 === procesado.sha256)) {
+          nuevos.push(procesado);
+        } else {
+          setError('Ese comprobante ya está adjunto en este pago.');
+        }
+      }
+      setComprobantes(nuevos);
+    } catch (fallo) {
+      setError(mensajeDeError(fallo));
+    } finally {
+      setProcesandoImagen(false);
+    }
+  }
+
   async function guardar(evento: React.FormEvent) {
     evento.preventDefault();
     setError(null);
@@ -99,7 +130,7 @@ export function Pagos() {
           };
         });
 
-      const resultado = await registrarPago(db, {
+      const entrada = {
         personaId,
         moneda,
         fechaPago,
@@ -108,7 +139,26 @@ export function Pagos() {
         referencia,
         observacion,
         aplicaciones: aplicaciones.length > 0 ? aplicaciones : undefined,
-      });
+        comprobantes,
+      };
+
+      let resultado;
+      try {
+        resultado = await registrarPago(db, entrada);
+      } catch (fallo) {
+        if (
+          fallo instanceof ErrorConflicto &&
+          window.confirm(
+            'Ya existe un comprobante idéntico. ¿Registrarlo de todos modos?',
+          )
+        ) {
+          resultado = await registrarPago(db, entrada, {
+            confirmarDuplicado: true,
+          });
+        } else {
+          throw fallo;
+        }
+      }
 
       setMensaje(
         `Pago registrado por ${formatearMoneda(resultado.pago.montoCentimos, moneda)}.` +
@@ -120,6 +170,7 @@ export function Pagos() {
       setReparto({});
       setReferencia('');
       setObservacion('');
+      setComprobantes([]);
       setRefresco((n) => n + 1);
     } catch (fallo) {
       setError(mensajeDeError(fallo));
@@ -220,6 +271,62 @@ export function Pagos() {
               onChange={(e) => setObservacion(e.target.value)}
             />
           </Campo>
+
+          <div className="ancho-completo campo">
+            <span>Comprobante (máximo 3)</span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={(e) => {
+                void agregarComprobantes(e.target.files);
+                e.target.value = '';
+              }}
+              disabled={procesandoImagen}
+            />
+            <small>
+              {procesandoImagen
+                ? 'Procesando imagen…'
+                : 'JPEG, PNG o WebP hasta 5 MB. Se guarda como PNG de 100×100 sin salir del dispositivo.'}
+            </small>
+          </div>
+
+          {comprobantes.length > 0 ? (
+            <div className="ancho-completo">
+              <div className="acciones">
+                {comprobantes.map((comprobante) => (
+                  <div key={comprobante.sha256} style={{ textAlign: 'center' }}>
+                    <img
+                      src={URL.createObjectURL(comprobante.imagen)}
+                      alt="Comprobante"
+                      width={90}
+                      height={90}
+                      style={{
+                        borderRadius: 8,
+                        border: '1px solid #e7e5e4',
+                        background: '#fff',
+                      }}
+                    />
+                    <div>
+                      <button
+                        className="boton boton-peligro boton-pequeno"
+                        type="button"
+                        onClick={() =>
+                          setComprobantes((actual) =>
+                            actual.filter(
+                              (c) => c.sha256 !== comprobante.sha256,
+                            ),
+                          )
+                        }
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="ancho-completo acciones">
             <button

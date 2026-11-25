@@ -9,6 +9,7 @@ import type {
 import { auditar } from '../db/auditoria';
 import { aCentimos } from '../dominio/dinero';
 import {
+  ErrorConflicto,
   ErrorNoEncontrado,
   ErrorReglaNegocio,
   ErrorValidacion,
@@ -53,6 +54,8 @@ export interface ResultadoPago {
 
 export interface OpcionesRegistroPago {
   alInsertarComprobante?: (indice: number) => void | Promise<void>;
+  /** Confirma el aviso de comprobante duplicado (mismo sha256). */
+  confirmarDuplicado?: boolean;
 }
 
 /**
@@ -162,6 +165,41 @@ export async function registrarPago(
   const montoCentimos = aCentimos(entrada.monto);
   if (montoCentimos <= 0) {
     throw new ErrorValidacion('El monto debe ser mayor que cero.', 'monto');
+  }
+
+  const comprobantes = entrada.comprobantes ?? [];
+  if (comprobantes.length > 3) {
+    throw new ErrorValidacion(
+      'Se permiten como máximo 3 comprobantes por pago.',
+      'comprobantes',
+    );
+  }
+  const configMetodos = (
+    await db.configuracion.get('metodos_con_comprobante')
+  )?.valor;
+  const metodosConComprobante = (configMetodos ?? '')
+    .split(',')
+    .map((m) => m.trim().toUpperCase())
+    .filter(Boolean);
+  if (
+    metodosConComprobante.includes(metodo.toUpperCase()) &&
+    comprobantes.length === 0
+  ) {
+    throw new ErrorValidacion(
+      `El método ${metodo} exige adjuntar un comprobante.`,
+      'comprobantes',
+    );
+  }
+  for (const comprobante of comprobantes) {
+    const duplicado = await db.comprobantesPago
+      .where('sha256')
+      .equals(comprobante.sha256)
+      .first();
+    if (duplicado && !opciones.confirmarDuplicado) {
+      throw new ErrorConflicto(
+        'Ya existe un comprobante idéntico. Confirma si deseas registrarlo de todos modos.',
+      );
+    }
   }
 
   const obligaciones = await obtenerObligacionesPendientes(
@@ -418,3 +456,56 @@ export async function registrarPago(
     obligaciones,
   };
 }
+
+export interface FiltroPagos {
+  personaId?: string;
+  estado?: 'REGISTRADO' | 'ANULADO';
+  metodoPago?: string;
+  tipo?: TipoObligacion;
+  desde?: string;
+  hasta?: string;
+}
+
+/** Listado liviano: nunca incluye las imágenes de los comprobantes. */
+export async function listarPagos(
+  db: BaseDatos,
+  filtro: FiltroPagos = {},
+): Promise<Pago[]> {
+  const [pagos, aplicaciones] = await Promise.all([
+    db.pagos.toArray(),
+    db.aplicacionesPago.toArray(),
+  ]);
+  const tipoPorPago = new Map<string, TipoObligacion>();
+  for (const aplicacion of aplicaciones) {
+    if (aplicacion.cargoId) tipoPorPago.set(aplicacion.pagoId, 'SUSCRIPCION');
+    else if (aplicacion.cuotaId) tipoPorPago.set(aplicacion.pagoId, 'PRESTAMO');
+  }
+
+  return pagos
+    .filter((pago) => {
+      if (filtro.personaId && pago.personaId !== filtro.personaId) return false;
+      if (filtro.estado && pago.estado !== filtro.estado) return false;
+      if (
+        filtro.metodoPago &&
+        pago.metodoPago.toUpperCase() !== filtro.metodoPago.toUpperCase()
+      ) {
+        return false;
+      }
+      if (filtro.tipo && tipoPorPago.get(pago.id) !== filtro.tipo) return false;
+      if (filtro.desde && pago.fechaPago < filtro.desde) return false;
+      if (filtro.hasta && pago.fechaPago > filtro.hasta) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.fechaPago !== b.fechaPago) return b.fechaPago.localeCompare(a.fechaPago);
+      return b.creadoEn.localeCompare(a.creadoEn);
+    });
+}
+
+export async function obtenerComprobantes(
+  db: BaseDatos,
+  pagoId: string,
+): Promise<ComprobantePago[]> {
+  return db.comprobantesPago.where('pagoId').equals(pagoId).toArray();
+}
+
