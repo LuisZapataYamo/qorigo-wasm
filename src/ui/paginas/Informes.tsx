@@ -10,6 +10,8 @@ import {
   prestamosACsv,
   rentabilidad,
   rentabilidadACsv,
+  cobranza,
+  cobranzaACsv,
   suscripcionesACsv,
 } from '../../aplicacion/reportes';
 import { formatearMoneda } from '../../dominio/dinero';
@@ -54,6 +56,10 @@ export function Informes() {
   );
   const rentabilidadMes = useLiveQuery(
     () => rentabilidad(db, periodo, moneda),
+    [periodo, moneda],
+  );
+  const cobranzaMes = useLiveQuery(
+    () => cobranza(db, periodo, moneda),
     [periodo, moneda],
   );
 
@@ -698,6 +704,176 @@ export function Informes() {
                     </tbody>
                   </table>
                 </div>
+              </>
+            )}
+          </article>
+
+          <article className="tarjeta">
+            <div className="encabezado-tarjeta">
+              <h2>Cobranza y cartera vencida</h2>
+              <button
+                className="boton boton-secundario boton-pequeno"
+                type="button"
+                disabled={!cobranzaMes}
+                onClick={() =>
+                  descargarCsv(
+                    `cobranza-${periodo.slice(0, 7)}-${moneda}.csv`,
+                    cobranzaACsv(cobranzaMes!),
+                  )
+                }
+              >
+                Exportar CSV
+              </button>
+            </div>
+            {!cobranzaMes ? (
+              <Cargando />
+            ) : (
+              <>
+                <div className="rejilla-metricas">
+                  <article className="metrica">
+                    <span>Exigible suscripciones</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.exigibleSuscripcionesCentimos,
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>Exigible préstamos</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.exigiblePrestamosCentimos,
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>Exigible total</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.exigibleTotalCentimos,
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>Vencido 1–30 días</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.antiguedad['1-30'],
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>31–60 días</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.antiguedad['31-60'],
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>61–90 días</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.antiguedad['61-90'],
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                  <article className="metrica">
+                    <span>Más de 90 días</span>
+                    <strong>
+                      {formatearMoneda(
+                        cobranzaMes.antiguedad.MAS_90,
+                        moneda,
+                      )}
+                    </strong>
+                  </article>
+                </div>
+
+                <h3 style={{ marginTop: '1rem' }}>Préstamos del mes</h3>
+                {cobranzaMes.prestamos.length === 0 ? (
+                  <p className="nota">Sin préstamos exigibles.</p>
+                ) : (
+                  <div className="tabla-contenedor">
+                    <table className="tabla">
+                      <thead>
+                        <tr>
+                          <th>Persona</th>
+                          <th>Tipo</th>
+                          <th className="numero">Arrastre</th>
+                          <th className="numero">Cuota del mes</th>
+                          <th className="numero">Exigible</th>
+                          <th className="numero">Atrasado no acumulado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cobranzaMes.prestamos.map((linea) => (
+                          <tr key={linea.prestamoId}>
+                            <td>{linea.persona}</td>
+                            <td>{linea.estricto ? 'Estricto' : 'Flexible'}</td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                linea.saldoAnteriorCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                linea.cuotaMesCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                linea.exigibleCentimos,
+                                moneda,
+                              )}
+                            </td>
+                            <td className="numero">
+                              {formatearMoneda(
+                                linea.atrasadoNoAcumuladoCentimos,
+                                moneda,
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <h3 style={{ marginTop: '1rem' }}>Morosos</h3>
+                {cobranzaMes.morosos.length === 0 ? (
+                  <p className="nota">No hay obligaciones vencidas.</p>
+                ) : (
+                  <div className="tabla-contenedor">
+                    <table className="tabla">
+                      <thead>
+                        <tr>
+                          <th>Persona</th>
+                          <th className="numero">Saldo vencido</th>
+                          <th className="numero">Días de atraso</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cobranzaMes.morosos.map((moroso) => (
+                          <tr key={moroso.personaId}>
+                            <td>{moroso.nombre}</td>
+                            <td className="numero">
+                              {formatearMoneda(moroso.saldoCentimos, moneda)}
+                            </td>
+                            <td className="numero">{moroso.diasMaxAtraso}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
           </article>

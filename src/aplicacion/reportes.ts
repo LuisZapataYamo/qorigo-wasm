@@ -1063,3 +1063,184 @@ export function rentabilidadACsv(informe: InformeRentabilidad): string {
   informe.porPersona.forEach(agregar);
   return aCsv(filas);
 }
+
+/* ------------------------------- CU-21 ------------------------------- */
+
+export type TramoAntiguedad = '1-30' | '31-60' | '61-90' | 'MAS_90';
+
+export interface ObligacionVencida {
+  personaId: string;
+  persona: string;
+  tipo: 'SUSCRIPCION' | 'PRESTAMO';
+  concepto: string;
+  fechaVencimiento: string;
+  saldoCentimos: number;
+  diasAtraso: number;
+  tramo: TramoAntiguedad;
+}
+
+export interface Moroso {
+  personaId: string;
+  nombre: string;
+  saldoCentimos: number;
+  diasMaxAtraso: number;
+}
+
+export interface DetalleExigiblePrestamo {
+  prestamoId: string;
+  persona: string;
+  estricto: boolean;
+  saldoAnteriorCentimos: number;
+  cuotaMesCentimos: number;
+  exigibleCentimos: number;
+  atrasadoNoAcumuladoCentimos: number;
+}
+
+export interface Cobranza {
+  periodo: string;
+  moneda: string;
+  exigibleSuscripcionesCentimos: number;
+  exigiblePrestamosCentimos: number;
+  exigibleTotalCentimos: number;
+  prestamos: DetalleExigiblePrestamo[];
+  morosos: Moroso[];
+  antiguedad: Record<TramoAntiguedad, number>;
+  obligacionesVencidas: ObligacionVencida[];
+}
+
+function tramoDe(dias: number): TramoAntiguedad {
+  if (dias <= 30) return '1-30';
+  if (dias <= 60) return '31-60';
+  if (dias <= 90) return '61-90';
+  return 'MAS_90';
+}
+
+function obligacionesVencidas(
+  ctx: ContextoReportes,
+  moneda: string,
+): ObligacionVencida[] {
+  const filas: ObligacionVencida[] = [];
+
+  for (const cargo of ctx.cargos) {
+    if (cargo.estado === 'ANULADO') continue;
+    const miembro = ctx.mapaMiembros.get(cargo.miembroId);
+    const suscripcion = miembro
+      ? ctx.mapaSuscripciones.get(miembro.suscripcionId)
+      : undefined;
+    if (!miembro || !suscripcion || suscripcion.moneda !== moneda) continue;
+    const saldo = Math.max(0, cargo.montoCentimos - pagadoCargo(ctx, cargo.id));
+    if (saldo <= 0 || cargo.fechaVencimiento >= ctx.hoy) continue;
+    const persona = ctx.mapaPersonas.get(miembro.personaId);
+    const dias = diasEntre(cargo.fechaVencimiento, ctx.hoy);
+    filas.push({
+      personaId: miembro.personaId,
+      persona: persona ? `${persona.apellidos}, ${persona.nombres}` : '—',
+      tipo: 'SUSCRIPCION',
+      concepto: `${suscripcion.nombre} · ${cargo.periodo.slice(0, 7)}`,
+      fechaVencimiento: cargo.fechaVencimiento,
+      saldoCentimos: saldo,
+      diasAtraso: dias,
+      tramo: tramoDe(dias),
+    });
+  }
+
+  for (const prestamo of ctx.prestamos) {
+    if (prestamo.estado !== 'ACTIVO' || prestamo.moneda !== moneda) continue;
+    const persona = ctx.mapaPersonas.get(prestamo.personaId);
+    for (const cuota of ctx.cuotas) {
+      if (cuota.prestamoId !== prestamo.id) continue;
+      const saldo = Math.max(
+        0,
+        cuota.montoProgramadoCentimos - pagadoCuota(ctx, cuota.id),
+      );
+      if (saldo <= 0 || cuota.fechaVencimiento >= ctx.hoy) continue;
+      const dias = diasEntre(cuota.fechaVencimiento, ctx.hoy);
+      filas.push({
+        personaId: prestamo.personaId,
+        persona: persona ? `${persona.apellidos}, ${persona.nombres}` : '—',
+        tipo: 'PRESTAMO',
+        concepto: `Cuota ${cuota.numeroCuota} de ${prestamo.plazoMeses}`,
+        fechaVencimiento: cuota.fechaVencimiento,
+        saldoCentimos: saldo,
+        diasAtraso: dias,
+        tramo: tramoDe(dias),
+      });
+    }
+  }
+
+  return filas.sort((a, b) => b.diasAtraso - a.diasAtraso);
+}
+
+export async function cobranza(
+  db: BaseDatos,
+  periodo: string = periodoActual(),
+  moneda = 'PEN',
+): Promise<Cobranza> {
+  const ctx = await cargarContexto(db);
+  const exigibleSubs = exigibleSuscripciones(ctx, periodo, moneda);
+  const exigiblePrest = exigiblePrestamos(ctx, periodo, moneda);
+  const vencidas = obligacionesVencidas(ctx, moneda);
+
+  const porPersona = new Map<string, Moroso>();
+  const antiguedad: Record<TramoAntiguedad, number> = {
+    '1-30': 0,
+    '31-60': 0,
+    '61-90': 0,
+    MAS_90: 0,
+  };
+  for (const fila of vencidas) {
+    antiguedad[fila.tramo] += fila.saldoCentimos;
+    const actual = porPersona.get(fila.personaId) ?? {
+      personaId: fila.personaId,
+      nombre: fila.persona,
+      saldoCentimos: 0,
+      diasMaxAtraso: 0,
+    };
+    actual.saldoCentimos += fila.saldoCentimos;
+    actual.diasMaxAtraso = Math.max(actual.diasMaxAtraso, fila.diasAtraso);
+    porPersona.set(fila.personaId, actual);
+  }
+
+  return {
+    periodo,
+    moneda,
+    exigibleSuscripcionesCentimos: exigibleSubs,
+    exigiblePrestamosCentimos: exigiblePrest.total,
+    exigibleTotalCentimos: exigibleSubs + exigiblePrest.total,
+    prestamos: exigiblePrest.detalle.map((detalle) => {
+      const persona = ctx.mapaPersonas.get(detalle.prestamo.personaId);
+      return {
+        prestamoId: detalle.prestamo.id,
+        persona: persona
+          ? `${persona.apellidos}, ${persona.nombres}`
+          : '—',
+        estricto: detalle.prestamo.estrictoCumplimiento,
+        saldoAnteriorCentimos: detalle.saldoAnterior,
+        cuotaMesCentimos: detalle.cuotaMes,
+        exigibleCentimos: detalle.exigible,
+        atrasadoNoAcumuladoCentimos: detalle.prestamo.estrictoCumplimiento
+          ? 0
+          : detalle.saldoAnterior,
+      };
+    }),
+    morosos: [...porPersona.values()].sort(
+      (a, b) => b.saldoCentimos - a.saldoCentimos,
+    ),
+    antiguedad,
+    obligacionesVencidas: vencidas,
+  };
+}
+
+export function cobranzaACsv(informe: Cobranza): string {
+  return aCsv(
+    informe.obligacionesVencidas.map((fila) => ({
+      persona: fila.persona,
+      tipo: fila.tipo,
+      concepto: fila.concepto,
+      vencimiento: fila.fechaVencimiento,
+      saldo: (fila.saldoCentimos / 100).toFixed(2),
+      dias_atraso: fila.diasAtraso,
+      tramo: fila.tramo,
+    })),
+  );
+}
