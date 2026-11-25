@@ -421,13 +421,13 @@ function calcularAlertas(
       cobrado += pagadoCargo(ctx, cargo.id);
     }
     const margen = cobrado - costo.montoCentimos;
-    if (margen < 0) {
+    if (margen < 0 && !suscripcion.esUsoPersonal) {
       suscripcionesEnPerdida.push({
         suscripcionId: suscripcion.id,
         nombre: suscripcion.nombre,
         margenRealCentimos: margen,
         causa: cobrado < costo.montoCentimos ? 'PÉRDIDA' : '',
-        alerta: !suscripcion.esUsoPersonal,
+        alerta: true,
       });
     }
   }

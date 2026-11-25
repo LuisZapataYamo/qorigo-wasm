@@ -55,3 +55,21 @@ src/
 ## Documentación
 
 El plan funcional completo está en [`docs/plan_v2.md`](docs/plan_v2.md).
+
+## Estado de implementación
+
+| Casos de uso | Estado |
+| --- | --- |
+| CU-01 a CU-06: personas, catálogos, suscripciones, miembros y cargos | Implementado |
+| CU-07 a CU-11: préstamos, cronograma, ajustes, incobrable y anulación | Implementado |
+| CU-12 a CU-16: pagos, comprobantes, anulación e historial | Implementado |
+| CU-17 a CU-21: dashboard, informes, rentabilidad y cobranza | Implementado |
+| CU-22: portal del miembro | Adaptado a vista por persona de solo lectura |
+| CU-23: autenticación y usuarios | Adaptado a acceso local opcional con PBKDF2 |
+| CU-24 a CU-26: PWA, exportación e importación JSON | Implementado |
+
+Las pruebas de aceptación están en `src/pruebas/cuXX.test.ts` y se ejecutan con
+`npm test`. Las adaptaciones de CU-22 y CU-23 se deben a que la aplicación no
+tiene servidor: los roles locales son informativos y no constituyen una
+frontera de seguridad frente a quien controla el dispositivo.
+

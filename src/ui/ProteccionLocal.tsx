@@ -5,17 +5,18 @@ import { Disposicion } from './Disposicion';
 import { PantallaAcceso } from './paginas/PantallaAcceso';
 
 export function ProteccionLocal() {
-  const configurado = useLiveQuery(
-    () => db.configuracion.get('acceso_configurado'),
+  const requiereAcceso = useLiveQuery(
+    async () =>
+      (await db.configuracion.get('acceso_configurado'))?.valor === 'SI',
     [],
   );
   const sesion = useLiveQuery(() => sesionActual(db), []);
 
-  if (configurado === undefined || sesion === undefined) {
+  if (requiereAcceso === undefined || sesion === undefined) {
     return <div className="pantalla-bloqueo">Cargando…</div>;
   }
 
-  if (configurado?.valor === 'SI' && !sesion) {
+  if (requiereAcceso && !sesion) {
     return <PantallaAcceso />;
   }
 
