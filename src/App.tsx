@@ -1,5 +1,5 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { Disposicion } from './ui/Disposicion';
+import { ProteccionLocal } from './ui/ProteccionLocal';
 import { Inicio } from './ui/paginas/Inicio';
 import { EnConstruccion } from './ui/paginas/EnConstruccion';
 import { Personas } from './ui/paginas/Personas';
@@ -8,12 +8,13 @@ import { Prestamos } from './ui/paginas/Prestamos';
 import { Pagos } from './ui/paginas/Pagos';
 import { Informes } from './ui/paginas/Informes';
 import { Portal } from './ui/paginas/Portal';
+import { Configuracion } from './ui/paginas/Configuracion';
 
 export function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route element={<Disposicion />}>
+        <Route element={<ProteccionLocal />}>
           <Route index element={<Inicio />} />
           <Route path="personas" element={<Personas />} />
           <Route path="suscripciones" element={<Suscripciones />} />
@@ -25,10 +26,7 @@ export function App() {
             element={<EnConstruccion titulo="Respaldo" caso="CU-25 y CU-26" />}
           />
           <Route path="portal" element={<Portal />} />
-          <Route
-            path="configuracion"
-            element={<EnConstruccion titulo="Configuración" caso="CU-23" />}
-          />
+          <Route path="configuracion" element={<Configuracion />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
