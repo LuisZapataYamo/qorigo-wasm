@@ -25,21 +25,24 @@ npm run iconos    # regenera los iconos PNG del manifiesto
 ## Arquitectura
 
 - **React + TypeScript + Vite** para la interfaz.
-- **Dexie** sobre **IndexedDB** para persistencia local y transacciones.
+- **Arquitectura hexagonal**: dominio puro, aplicación con puertos, infraestructura con adaptadores.
+- **Dexie** sobre **IndexedDB** como adaptador de persistencia local.
 - **vite-plugin-pwa** para el manifiesto, la instalación y el modo sin conexión.
-- **Vitest + fake-indexeddb** para ejecutar las pruebas contra una base real en
-  memoria.
+- **Vitest + fake-indexeddb** para ejecutar las pruebas contra una base real en memoria.
 - Importes en **enteros de céntimos**; nunca coma flotante.
 - Identificadores **UUID** en todas las entidades para poder transportarlas.
 
 ```
 src/
-  dominio/      dinero, fechas, normalización, errores
-  db/           esquema Dexie, tipos, semilla, auditoría
-  aplicacion/   casos de uso (reglas de negocio)
-  ui/           pantallas y componentes
-  pruebas/      utilidades de prueba
+  dominio/          reglas y cálculos puros (sin React, Dexie ni navegador)
+  aplicacion/       casos de uso y puertos (persistencia, notificador, imagen)
+  infraestructura/  adaptadores Dexie, notificaciones, imágenes y navegador
+  ui/               pantallas y componentes React
+  pruebas/          aceptación por caso de uso y regla de arquitectura
 ```
+
+Detalle de capas, puertos y principios SOLID en
+[`docs/arquitectura.md`](docs/arquitectura.md).
 
 ## Datos y respaldo
 
