@@ -2,6 +2,8 @@
 
 Refinamiento del plan v1 y del brief. Incluye los cambios solicitados: cuotas automáticas, comprobantes en base64 de 100×100, préstamos de cumplimiento estricto o flexible, tarifas por miembro, informes de pérdida, rentabilidad y balance mensual. Fecha de referencia: 24/11/2026.
 
+> **Nota de alcance (26/11/2026).** La arquitectura final es una **PWA local sin backend**. PostgreSQL, NestJS, la autenticación remota y el despliegue con servidor de las secciones 1 a 12 quedan reemplazados por la sección 13. Las reglas financieras, cálculos y casos de uso CU-01 a CU-23 se mantienen, con las adaptaciones de CU-22 y CU-23 indicadas en 13.7.
+
 ## 0. Qué cambia respecto a la v1
 
 | Tema | v1 | v2 |
@@ -1514,3 +1516,333 @@ Complementan los casos de la sección 11.2. Cada prueba tiene el formato **Dado 
 | CU-12 | PA-CU12-01 a 13 |  |  |
 
 Las pruebas PA-CU17-01 y PA-CU17-02 asumen que existen los costos de noviembre de las 3 suscripciones y que los pagos de suscripción de octubre se registraron en noviembre. El interés cobrado de 100 es aproximado: depende del reparto capital/interés de cada aplicación, con una variación de unos pocos céntimos por redondeo.
+
+## 13. Modificaciones adicionales (PWA local, respaldos, menú móvil y recordatorios)
+
+Esta sección documenta los cambios incorporados después del plan v2 y reemplaza la arquitectura de servidor. El objetivo es una sola aplicación para web y Android, instalable como PWA, con los datos guardados únicamente en el dispositivo y compartidos entre instalaciones mediante un archivo JSON.
+
+### 13.1 Decisiones de arquitectura final
+
+| Tema | Decisión |
+| --- | --- |
+| Aplicación | PWA responsive, instalable en Android y utilizable en navegadores de escritorio |
+| Stack | React 18 + TypeScript estricto + Vite 6 |
+| Persistencia | IndexedDB mediante Dexie, esquema versionado |
+| Backend / API | **No existe**. Toda la lógica corre en el cliente |
+| Base de datos central | **No existe**. PostgreSQL, Prisma y NestJS quedan fuera de alcance |
+| Hosting | Archivos estáticos por HTTPS: Vercel, Netlify, Cloudflare Pages, GitHub Pages, Nginx |
+| Rutas | `HashRouter` (`/#/personas`), para que el refresco funcione sin rewrites del servidor |
+| Identificadores | UUID estables en todas las entidades y referencias |
+| Importes | Enteros en céntimos; nunca `FLOAT` |
+| Comprobantes | `Blob` PNG 100×100 RGB en IndexedDB; Base64 solo al exportar/importar JSON |
+| Intercambio | Exportación e importación manual de un archivo JSON versionado |
+| Acceso | Bloqueo local opcional con PBKDF2; no hay autenticación remota |
+| Portal del miembro | Vista local por persona de solo lectura |
+| Recordatorios | Notificaciones locales del navegador; no hay push desde servidor |
+| Pruebas | Vitest + `fake-indexeddb`, ejecutadas contra una base real en memoria |
+
+**Consecuencia principal:** cada instalación es independiente. Los cambios de un dispositivo no aparecen en otro hasta exportar e importar un nuevo JSON. La aplicación no sincroniza datos.
+
+### 13.2 Requerimientos adicionales
+
+| ID | Requerimiento | Prioridad |
+| --- | --- | --- |
+| RF-LOC-01 | La aplicación funciona como PWA responsive y puede instalarse en Android y escritorio. | M |
+| RF-LOC-02 | Después de la primera carga, las funciones de consulta y registro operan sin internet. | M |
+| RF-LOC-03 | Los datos de negocio se almacenan únicamente en IndexedDB del dispositivo actual. | M |
+| RF-LOC-04 | Exportar todo el conjunto de datos a un JSON versionado, con UUID, relaciones y comprobantes. | M |
+| RF-LOC-05 | Importar un JSON con vista previa, validación y modos explícitos de reemplazo o combinación. | M |
+| RF-LOC-06 | Una importación inválida, incompatible o fallida no altera los datos existentes. | M |
+| RF-LOC-07 | Advertir sobre privacidad del archivo exportado y riesgo de pérdida de datos locales. | M |
+| RF-MOV-01 | En pantallas de hasta 860 px, el menú se abre con un botón hamburguesa. | M |
+| RF-MOV-02 | El menú móvil se muestra como listado vertical, no como fila horizontal con scroll. | M |
+| RF-MOV-03 | El menú móvil se cierra al elegir una sección, tocar fuera o pulsar `Escape`. | M |
+| RF-NOT-01 | Permitir activar notificaciones locales desde Configuración, con petición de permiso del navegador. | M |
+| RF-NOT-02 | Configurar días de anticipación entre 0 y 30. | M |
+| RF-NOT-03 | Avisar cargos de suscripción próximos, del día y vencidos. | M |
+| RF-NOT-04 | Avisar cuotas de préstamo próximas, del día y vencidas. | M |
+| RF-NOT-05 | Avisar el día de facturación de una suscripción activa sin cargos generados para el periodo. | S |
+| RF-NOT-06 | No repetir un aviso ya mostrado; sí volver a avisar el día del vencimiento. | M |
+| RF-NOT-07 | Calcular los avisos sin internet, usando solo IndexedDB. | M |
+| RF-NOT-08 | Informar que, con la app cerrada, el navegador no garantiza el aviso. | M |
+
+### 13.3 Casos de uso nuevos
+
+| ID | Caso de uso | Actor | Requerimientos |
+| --- | --- | --- | --- |
+| CU-24 | Usar la aplicación PWA sin conexión | Usuario local | RF-LOC-01, 02, 03 |
+| CU-25 | Exportar el conjunto de datos local | Usuario local | RF-LOC-04, 07 |
+| CU-26 | Importar un conjunto de datos JSON | Usuario local | RF-LOC-05, 06 |
+| CU-27 | Recibir recordatorios de pago | Usuario local | RF-NOT-01 a 08 |
+
+**Usuario local:** persona que opera la aplicación en el dispositivo. No hay roles remotos ni permisos de servidor.
+
+#### CU-24 Usar la aplicación PWA sin conexión
+
+**Precondición:** la PWA se cargó al menos una vez con internet y el navegador permite almacenamiento local.
+
+**Flujo principal**
+
+1. El usuario instala la PWA o la abre desde el navegador.
+2. Sin conexión, la interfaz se carga desde la caché del service worker.
+3. La aplicación lee y escribe en IndexedDB.
+4. El usuario consulta o registra operaciones y recibe confirmación local.
+
+**Flujos alternos**
+
+- La aplicación nunca se cargó: se informa que se necesita una primera visita con conexión.
+- IndexedDB no está disponible o la cuota está llena: se muestra un error recuperable y no se confirma una operación no guardada.
+
+**Postcondición:** los datos permanecen en el almacenamiento de ese navegador/origen. No se envían a un servidor.
+
+#### CU-25 Exportar el conjunto de datos local
+
+**Precondición:** acceso a IndexedDB.
+
+**Flujo principal**
+
+1. El usuario elige “Exportar datos”.
+2. Se advierte que el JSON puede contener datos personales, financieros e imágenes.
+3. La aplicación lee las entidades, conserva UUID y relaciones, y convierte los comprobantes a Base64.
+4. Se descarga `qorigo-AAAA-MM-DD...json` con metadatos de formato, versión, fecha, zona horaria y monedas.
+5. La aplicación confirma y recuerda guardar el archivo de forma segura.
+
+**Flujos alternos**
+
+- El usuario cancela: no se genera archivo.
+- Falla la lectura o serialización: se informa el error y no se presenta como completada.
+
+**Postcondición:** se obtiene una copia transportable sin transmitir datos a un servidor. No se exportan contraseñas, sesiones ni la configuración de acceso local.
+
+#### CU-26 Importar un conjunto de datos JSON
+
+**Precondición:** se dispone de un archivo exportado por QoriGo.
+
+**Flujo principal**
+
+1. El usuario selecciona el archivo.
+2. Se valida formato, versión, tipos, UUID, referencias, integridad de imágenes y duplicados internos, sin escribir nada.
+3. Se muestra una vista previa con fecha, versión, conteos, errores y advertencias.
+4. El usuario elige **combinar** o **reemplazar** y confirma.
+5. En reemplazo se ofrece exportar antes una copia y se solicita confirmación explícita.
+6. La importación se aplica en una única transacción IndexedDB.
+7. Se informa cuántos registros se importaron u omitieron.
+
+**Flujos alternos**
+
+- JSON inválido, versión futura, referencia inexistente o comprobante inválido: se rechaza sin cambios.
+- En modo combinar, un UUID existe con contenido distinto: se cancela toda la importación; no se sobrescribe.
+- Falla la transacción: rollback completo y se conservan los datos previos.
+
+**Postcondición:** los datos del paquete quedan disponibles localmente. Las instalaciones siguen independientes hasta el siguiente intercambio manual.
+
+#### CU-27 Recibir recordatorios de pago
+
+**Precondición:** el usuario activó los recordatorios y concedió el permiso del navegador.
+
+**Flujo principal**
+
+1. Al abrir la app, cada 15 minutos mientras está abierta y al volver a la pestaña, se revisan las obligaciones pendientes.
+2. Se generan avisos para cargos y cuotas según `recordatorios_dias`:
+   - `AVISO`: vence dentro de la ventana configurada;
+   - `HOY`: vence hoy;
+   - `VENCIDO`: la fecha ya pasó y sigue con saldo.
+3. Si una suscripción activa no tiene cargos del periodo, se avisa su día de facturación.
+4. Cada aviso se muestra como notificación del sistema y se registra para no repetirlo.
+5. Al día siguiente de un aviso previo, el vencimiento del día genera un aviso nuevo (`HOY`).
+
+**Flujos alternos**
+
+- Recordatorios desactivados: no se envía nada.
+- Permiso denegado o no concedido: la app lo informa y no envía.
+- Navegador sin soporte: se informa y se mantiene el resto de la aplicación.
+- Aplicación cerrada: el navegador no ejecuta la revisión; no hay aviso garantizado.
+
+**Postcondición:** los avisos mostrados quedan marcados en la tabla local `recordatorios`. La aplicación no usa internet ni un servidor push.
+
+### 13.4 Modelo de datos adicional
+
+Se añade la versión 2 del esquema IndexedDB con una tabla:
+
+| Tabla | Campos | Uso |
+| --- | --- | --- |
+| `recordatorios` | `clave` (PK), `tipo`, `entidadId`, `fechaVencimiento`, `enviadoEn` | Evita repetir avisos ya mostrados |
+
+La clave combina obligación, fecha y momento, por ejemplo `CUOTA:<id>:2026-12-01:HOY`. Así se avisa una vez como próximo, otra el día del vencimiento y otra si queda vencido.
+
+Claves de configuración nuevas:
+
+| Clave | Valor por defecto |
+| --- | --- |
+| `notificaciones_activas` | `NO` |
+| `recordatorios_dias` | `3` |
+
+Las marcas de recordatorios son estado del dispositivo y **no se incluyen** en la exportación JSON. Tampoco se exportan `usuarios`, `sesion` ni `acceso_configurado`.
+
+**Formato de intercambio**
+
+```json
+{
+  "format": "qorigo-data",
+  "formatVersion": 1,
+  "schemaVersion": 1,
+  "appVersion": "1.0.0",
+  "exportedAt": "2026-11-26T12:00:00.000Z",
+  "timezone": "America/Lima",
+  "currencies": ["PEN"],
+  "data": {
+    "personas": [],
+    "monedas": [],
+    "plataformas": [],
+    "suscripciones": [],
+    "costosSuscripcionPeriodo": [],
+    "miembrosSuscripcion": [],
+    "cargosSuscripcion": [],
+    "prestamos": [],
+    "cuotasPrestamo": [],
+    "cuotaAjustes": [],
+    "pagos": [],
+    "aplicacionesPago": [],
+    "comprobantes": [],
+    "configuracion": [],
+    "auditoria": []
+  }
+}
+```
+
+Los comprobantes del paquete incluyen `imagenBase64`, `mimeType`, `ancho`, `alto`, `sha256` y `subidoEn`. Al importar se valida la firma PNG, el MIME y que las dimensiones coincidan con la imagen.
+
+### 13.5 PWA y despliegue estático
+
+`npm run build` genera en `dist/`:
+
+- `index.html`, JavaScript y CSS,
+- `manifest.webmanifest`,
+- `sw.js` y el runtime de Workbox,
+- iconos 192 y 512,
+- recursos precacheados para abrir sin conexión.
+
+Requisitos de despliegue:
+
+| Tema | Valor |
+| --- | --- |
+| Protocolo | HTTPS (o `localhost` en desarrollo) |
+| Servidor | Solo archivos estáticos |
+| Framework en Vercel | Vite |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+| Variables de entorno | Ninguna |
+| Rewrites | No necesarios gracias a `HashRouter` |
+
+La primera visita requiere internet; después el service worker sirve la interfaz offline. Los datos no se guardan en Vercel ni en ningún servidor: quedan en el navegador del dispositivo. Borrar los datos del sitio o desinstalar la PWA puede eliminarlos, por eso se ofrecen exportación e importación JSON.
+
+### 13.6 Recordatorios y límites del navegador
+
+- La API de notificaciones requiere **permiso explícito** del usuario; se solicita desde un botón, no automáticamente.
+- Los avisos se calculan con IndexedDB: **no requieren internet**.
+- Funcionan en Android y en navegadores de escritorio. No es una función exclusiva de móviles.
+- Se revisan al abrir la app, cada 15 minutos mientras está abierta y al volver a la pestaña.
+- Con la app cerrada **no hay aviso garantizado**. El navegador no ejecuta temporizadores locales de forma fiable y no existe servidor push.
+- Si se necesitara un aviso garantizado con la app cerrada, habría que añadir un servidor de push o una app nativa con alarmas locales; ambas opciones rompen el requisito de datos solo en el dispositivo.
+- Las notificaciones pueden mostrar importes y nombres en la pantalla de bloqueo. Es una decisión de privacidad del usuario y del sistema operativo.
+
+### 13.7 Adaptaciones de CU-22 y CU-23
+
+| Caso de uso original | Adaptación local |
+| --- | --- |
+| CU-22 Portal del miembro con login remoto | Se reemplaza por “Vista por persona”: el usuario local elige una persona y ve sus suscripciones, cuotas, pagos y saldos en modo solo lectura. Un identificador ajeno se comporta como inexistente. |
+| CU-23 Autenticación JWT, roles y recuperación por correo | Se reemplaza por un acceso local opcional con PBKDF2. Los roles ADMIN/MEMBER son informativos y no protegen los datos frente a quien controla el dispositivo. No hay recuperación remota: se restaura un respaldo o se configura de nuevo el acceso. |
+
+Las pruebas de aceptación originales de CU-22 y CU-23 se reinterpretan en consecuencia; las validaciones de autorización por servidor no aplican a una PWA sin backend.
+
+### 13.8 Menú móvil
+
+- Punto de quiebre: **860 px**.
+- En escritorio se mantiene la barra lateral vertical.
+- En móvil aparece un botón hamburguesa en la cabecera.
+- Al abrirlo, la navegación se muestra como **listado vertical** sobre un fondo oscurecido.
+- El icono cambia a una X y `aria-expanded` refleja el estado.
+- Se cierra al elegir una sección, tocar el fondo o pulsar `Escape`.
+- El botón incluye `aria-label`, `aria-expanded` y `aria-controls`.
+
+### 13.9 Pruebas de aceptación adicionales
+
+#### CU-24 Usar la PWA sin conexión
+
+| ID | Escenario | Resultado esperado |
+| --- | --- | --- |
+| PA-CU24-01 | Instalación y manifiesto | Manifiesto `standalone`, iconos 192 y 512 válidos, PWA registrada |
+| PA-CU24-02 | Primera carga | La interfaz se precarga y requiere conexión solo la primera vez |
+| PA-CU24-03 | Uso offline | Tras la primera carga, la interfaz abre desde caché y opera con IndexedDB |
+| PA-CU24-04 | Persistencia | Los datos sobreviven al cerrar y reabrir la base |
+| PA-CU24-05 | Independencia | Dos instalaciones no comparten datos automáticamente |
+| PA-CU24-06 | Sin soporte de persistencia | Se informa sin bloquear la app |
+
+#### CU-25 Exportar datos
+
+| ID | Escenario | Resultado esperado |
+| --- | --- | --- |
+| PA-CU25-01 | Exportación completa | Incluye personas, suscripciones, préstamos, pagos, aplicaciones y comprobantes con UUID |
+| PA-CU25-02 | Metadatos | Formato, versión, fecha, versión de app y zona horaria |
+| PA-CU25-03 | Comprobantes | Base64 válido que se decodifica como PNG 100×100 |
+| PA-CU25-04 | Privacidad | Se advierte que el archivo contiene datos sensibles |
+| PA-CU25-05 | Sin efectos | Exportar no modifica los datos locales |
+| PA-CU25-06 | Error de lectura | Se informa y no se declara completada |
+| PA-CU25-07 | Credenciales | No se exportan contraseñas, sesiones ni acceso local |
+
+#### CU-26 Importar datos
+
+| ID | Escenario | Resultado esperado |
+| --- | --- | --- |
+| PA-CU26-01 | Vista previa | Muestra versión, fecha y conteos sin escribir |
+| PA-CU26-02 | Restauración | Se recuperan datos, relaciones y comprobantes con los mismos UUID |
+| PA-CU26-03 | Reemplazo | Sustituye los datos de negocio y conserva el acceso local del dispositivo |
+| PA-CU26-04 | Vista previa inválida | No modifica la base |
+| PA-CU26-05 | Combinar idénticos | No duplica; informa registros omitidos |
+| PA-CU26-06 | Conflicto de UUID | Cancela la importación sin sobrescribir |
+| PA-CU26-07 | JSON malformado | Se rechaza |
+| PA-CU26-08 | Versión futura | Se rechaza con mensaje claro |
+| PA-CU26-09 | Referencia inexistente | Se rechaza el paquete completo |
+| PA-CU26-10 | Comprobante inválido | Se rechaza antes de escribir |
+| PA-CU26-11 | Fallo transaccional | Rollback completo |
+| PA-CU26-12 | Transferencia manual | El segundo dispositivo queda independiente tras importar |
+
+#### CU-27 Recordatorios de pago
+
+| ID | Escenario | Resultado esperado |
+| --- | --- | --- |
+| PA-CU27-01 | Cálculo de avisos | Detecta vencidos, de hoy y próximos dentro de la ventana |
+| PA-CU27-02 | Día de facturación | Avisa una suscripción activa sin cargos del periodo |
+| PA-CU27-03 | Duplicados | Un aviso se envía una sola vez |
+| PA-CU27-04 | Desactivado o sin permiso | No envía y explica el motivo |
+| PA-CU27-05 | Día del vencimiento | Se genera un aviso nuevo `HOY` aunque ya hubiera un `AVISO` |
+| PA-CU27-06 | Navegador sin soporte | La app sigue funcionando y lo informa |
+
+#### Menú móvil
+
+| ID | Escenario | Resultado esperado |
+| --- | --- | --- |
+| PA-MOV-01 | Vista móvil | El botón hamburguesa es visible y la navegación está oculta |
+| PA-MOV-02 | Abrir menú | Se despliega una lista vertical con las 9 secciones y fondo modal |
+| PA-MOV-03 | Cerrar | Cierra con la X, tocando fuera o pulsando `Escape` |
+| PA-MOV-04 | Navegar | Al elegir una sección el menú se cierra y cambia la ruta |
+| PA-MOV-05 | Escritorio | La barra lateral permanece visible y el botón hamburguesa no aparece |
+
+### 13.10 Estado de implementación y trazabilidad
+
+| Aspecto | Resultado |
+| --- | --- |
+| Casos de uso CU-01 a CU-26 | Implementados |
+| Caso de uso CU-27 | Implementado como recordatorios locales |
+| Pruebas automatizadas | 27 archivos, 174 pruebas aprobadas |
+| Comprobación de tipos | `tsc --noEmit` sin errores |
+| Compilación | `npm run build` correcto; genera `sw.js` y `manifest.webmanifest` |
+| Navegador | Flujos principales y menú móvil verificados sin errores de consola |
+| Proceso | Una rama por caso de uso, commit semántico y merge `--no-ff` a `develop` |
+
+**Limitaciones aceptadas**
+
+- Sin sincronización automática entre dispositivos.
+- Sin notificaciones garantizadas con la app cerrada.
+- El acceso local no es una frontera de seguridad frente a quien controla el dispositivo.
+- La pérdida del almacenamiento del navegador implica pérdida de datos si no existe un JSON exportado.
