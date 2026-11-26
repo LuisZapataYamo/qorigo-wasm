@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   cambiarPassword,
   cerrarSesion,

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import type { Decodificador } from '../aplicacion/comprobantes';
+import type { Decodificador } from '../infraestructura/imagen/comprobantes';
 
 /**
  * Decodificador de pruebas. En el navegador se usa createImageBitmap; aquí

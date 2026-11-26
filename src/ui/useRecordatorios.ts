@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { db } from '../db/baseDatos';
+import { db } from '../infraestructura/persistencia/baseDatos';
 import { ejecutarRecordatorios } from '../aplicacion/notificaciones';
 import { notificadorNavegador } from '../infraestructura/notificaciones/navegador';
 

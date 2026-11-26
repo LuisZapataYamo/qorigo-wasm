@@ -22,15 +22,10 @@ import {
   planificarAplicaciones,
   totalAplicado,
 } from '../dominio/pagos';
+import type { ComprobanteProcesado } from './puertos/imagen';
 import { cargarAuxiliaresSaldos, pagadoDeCargo, pagadoDeCuota } from './saldos';
 
-export interface ComprobanteProcesado {
-  imagen: Blob;
-  mimeType: string;
-  ancho: number;
-  alto: number;
-  sha256: string;
-}
+export type { ComprobanteProcesado } from './puertos/imagen';
 
 export interface AplicacionSolicitada {
   tipo: TipoObligacion;

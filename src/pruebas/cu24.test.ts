@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BaseDatos, crearBaseDeDatos } from '../db/baseDatos';
+import { BaseDatos, crearBaseDeDatos } from '../infraestructura/persistencia/baseDatos';
 import { registrarPersona } from '../aplicacion/personas';
 import {
   estimarAlmacenamiento,
   formatearBytes,
   persistenciaDisponible,
   solicitarPersistencia,
-} from '../aplicacion/almacenamiento';
+} from '../infraestructura/navegador/almacenamiento';
 import { baseTemporal, destruirBase } from './util';
 
 let db: BaseDatos;

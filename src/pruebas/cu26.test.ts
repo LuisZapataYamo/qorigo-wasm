@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { crearBaseDeDatos, type BaseDatos } from '../db/baseDatos';
-import { procesarComprobante } from '../aplicacion/comprobantes';
+import { crearBaseDeDatos, type BaseDatos } from '../infraestructura/persistencia/baseDatos';
+import { procesarComprobante } from '../infraestructura/imagen/comprobantes';
 import { generarPeriodo } from '../aplicacion/cargos';
 import { agregarMiembro } from '../aplicacion/miembros';
 import {

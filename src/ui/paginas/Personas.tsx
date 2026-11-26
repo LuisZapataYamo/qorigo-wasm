@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   ErrorDocumentoDuplicado,
   consultarFichaPersona,
@@ -18,7 +18,7 @@ import { mensajeDeError } from '../../dominio/errores';
 import { formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha } from '../../dominio/fechas';
 import { nombreCompleto } from '../../dominio/nombres';
-import type { Persona } from '../../db/tipos';
+import type { Persona } from '../../dominio/modelo';
 import { Aviso, Cargando, Campo, Etiqueta, Vacio } from '../componentes';
 
 const FORMULARIO_VACIO: EntradaPersona = {

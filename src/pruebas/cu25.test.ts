@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import type { BaseDatos } from '../db/baseDatos';
+import type { BaseDatos } from '../infraestructura/persistencia/baseDatos';
 import {
   ADVERTENCIA_EXPORTACION,
   exportarDatos,
   nombreArchivoExportacion,
   serializarPaquete,
 } from '../aplicacion/respaldo';
-import { procesarComprobante } from '../aplicacion/comprobantes';
+import { procesarComprobante } from '../infraestructura/imagen/comprobantes';
 import { generarPeriodo } from '../aplicacion/cargos';
 import { agregarMiembro } from '../aplicacion/miembros';
 import {

@@ -15,7 +15,7 @@ import type {
   Prestamo,
   Suscripcion,
 } from '../dominio/modelo';
-import { comprobanteABase64 } from './comprobantes';
+import { comprobanteABase64 } from './base64';
 
 export const FORMATO = 'qorigo-data';
 export const FORMAT_VERSION = 1;

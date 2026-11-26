@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   actualizarSuscripcion,
   crearSuscripcion,
@@ -21,7 +21,7 @@ import { formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy, periodoActual } from '../../dominio/fechas';
 import { generarPeriodo, type ResultadoGeneracion } from '../../aplicacion/cargos';
 import { nombreCompleto } from '../../dominio/nombres';
-import type { Persona, Suscripcion } from '../../db/tipos';
+import type { Persona, Suscripcion } from '../../dominio/modelo';
 import { Aviso, Cargando, Campo, Etiqueta, Vacio, colorEstadoSuscripcion } from '../componentes';
 
 const FORMULARIO = {

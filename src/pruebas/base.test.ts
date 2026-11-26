@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import type { BaseDatos } from '../db/baseDatos';
+import type { BaseDatos } from '../infraestructura/persistencia/baseDatos';
 import { baseTemporal, destruirBase } from './util';
 
 let db: BaseDatos;
@@ -20,7 +20,9 @@ describe('base local', () => {
       '30',
     );
 
-    const { asegurarSemilla } = await import('../db/semilla');
+    const { asegurarSemilla } = await import(
+      '../infraestructura/persistencia/semilla'
+    );
     await asegurarSemilla(db);
 
     expect(await db.monedas.count()).toBe(3);

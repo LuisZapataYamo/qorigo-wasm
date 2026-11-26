@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import type { BaseDatos } from '../db/baseDatos';
+import type { BaseDatos } from '../infraestructura/persistencia/baseDatos';
 import {
   procesarComprobante,
   type ComprobanteProcesado,
-} from '../aplicacion/comprobantes';
+} from '../infraestructura/imagen/comprobantes';
 import {
   listarPagos,
   obtenerComprobantes,

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   ajustarCuota,
   anularPrestamo,
@@ -20,7 +20,7 @@ import { formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy, sumarMeses } from '../../dominio/fechas';
 import { mensajeDeError } from '../../dominio/errores';
 import { nombreCompleto } from '../../dominio/nombres';
-import type { CuotaPrestamo, Persona } from '../../db/tipos';
+import type { CuotaPrestamo, Persona } from '../../dominio/modelo';
 import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
 
 export function Prestamos() {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { BaseDatos } from '../db/baseDatos';
+import type { BaseDatos } from '../infraestructura/persistencia/baseDatos';
 import { simularPrestamo } from '../aplicacion/prestamos';
 import { ErrorValidacion } from '../dominio/errores';
 import { baseTemporal, destruirBase } from './util';

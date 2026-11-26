@@ -18,7 +18,7 @@ import type {
   SesionRegistro,
   Suscripcion,
   Usuario,
-} from './tipos';
+} from '../../dominio/modelo';
 
 export class BaseDatos extends Dexie {
   personas!: Table<Persona, string>;

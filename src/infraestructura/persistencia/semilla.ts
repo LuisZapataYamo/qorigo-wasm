@@ -1,5 +1,5 @@
 import type { BaseDatos } from './baseDatos';
-import { nuevoId } from '../dominio/ids';
+import { nuevoId } from '../../dominio/ids';
 
 export const MONEDAS_INICIALES = [
   { codigo: 'PEN', nombre: 'Sol peruano', decimales: 2, simbolo: 'S/' },
