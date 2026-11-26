@@ -1,12 +1,12 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   AplicacionPago,
   ComprobantePago,
   ObligacionPendiente,
   Pago,
   TipoObligacion,
-} from '../db/tipos';
-import { auditar } from '../db/auditoria';
+} from '../dominio/modelo';
+import { auditar } from './auditoria';
 import { aCentimos } from '../dominio/dinero';
 import {
   ErrorConflicto,
@@ -63,7 +63,7 @@ export interface OpcionesRegistroPago {
  * La moneda se toma de la suscripción o del préstamo, nunca del pago.
  */
 export async function obtenerObligacionesPendientes(
-  db: BaseDatos,
+  db: DatosQoriGo,
   personaId: string,
   tipo?: TipoObligacion,
 ): Promise<ObligacionPendiente[]> {
@@ -146,7 +146,7 @@ export async function obtenerObligacionesPendientes(
  * transacción.
  */
 export async function registrarPago(
-  db: BaseDatos,
+  db: DatosQoriGo,
   entrada: EntradaPago,
   opciones: OpcionesRegistroPago = {},
 ): Promise<ResultadoPago> {
@@ -476,7 +476,7 @@ export interface FiltroPagos {
 
 /** Listado liviano: nunca incluye las imágenes de los comprobantes. */
 export async function listarPagos(
-  db: BaseDatos,
+  db: DatosQoriGo,
   filtro: FiltroPagos = {},
 ): Promise<Pago[]> {
   const [pagos, aplicaciones] = await Promise.all([
@@ -511,7 +511,7 @@ export async function listarPagos(
 }
 
 export async function obtenerComprobantes(
-  db: BaseDatos,
+  db: DatosQoriGo,
   pagoId: string,
 ): Promise<ComprobantePago[]> {
   return db.comprobantesPago.where('pagoId').equals(pagoId).toArray();
@@ -522,7 +522,7 @@ export async function obtenerComprobantes(
  * como inexistente, igual que un 404 en el plan original.
  */
 export async function obtenerPagoDePersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   pagoId: string,
   personaId: string,
 ): Promise<Pago> {
@@ -534,7 +534,7 @@ export async function obtenerPagoDePersona(
 }
 
 export async function obtenerComprobanteDePersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   pagoId: string,
   comprobanteId: string,
   personaId: string,
@@ -550,7 +550,7 @@ export async function obtenerComprobanteDePersona(
 /* ------------------------------- CU-15 ------------------------------- */
 
 export async function anularPago(
-  db: BaseDatos,
+  db: DatosQoriGo,
   pagoId: string,
   motivo: string,
   usuarioId?: string,

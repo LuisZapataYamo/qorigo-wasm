@@ -1,5 +1,5 @@
-import type { AplicacionPago, Pago } from '../db/tipos';
-import type { BaseDatos } from '../db/baseDatos';
+import type { AplicacionPago, Pago } from '../dominio/modelo';
+import type { DatosQoriGo } from './puertos/persistencia';
 
 export interface AuxiliaresSaldos {
   pagosRegistrados: Set<string>;
@@ -8,7 +8,7 @@ export interface AuxiliaresSaldos {
 
 /** Carga una sola vez los pagos válidos y sus aplicaciones. */
 export async function cargarAuxiliaresSaldos(
-  db: BaseDatos,
+  db: DatosQoriGo,
 ): Promise<AuxiliaresSaldos> {
   const [pagos, aplicaciones] = await Promise.all([
     db.pagos.toArray(),

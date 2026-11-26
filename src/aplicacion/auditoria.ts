@@ -1,15 +1,15 @@
-import type { BaseDatos } from '../db/baseDatos';
-import type { AuditoriaRegistro } from '../db/tipos';
+import type { AuditoriaRegistro } from '../dominio/modelo';
 import { nuevoId } from '../dominio/ids';
+import type { DatosQoriGo } from './puertos/persistencia';
 
 export type EntradaAuditoria = Omit<AuditoriaRegistro, 'id' | 'creadoEn'>;
 
 /** Registra quién, cuándo y qué cambió. */
 export async function auditar(
-  db: BaseDatos,
+  datos: DatosQoriGo,
   entrada: EntradaAuditoria,
 ): Promise<void> {
-  await db.auditoria.add({
+  await datos.auditoria.add({
     ...entrada,
     id: nuevoId(),
     creadoEn: new Date().toISOString(),
@@ -17,18 +17,18 @@ export async function auditar(
 }
 
 export async function leerConfiguracion(
-  db: BaseDatos,
+  datos: DatosQoriGo,
   clave: string,
   porDefecto = '',
 ): Promise<string> {
-  const registro = await db.configuracion.get(clave);
+  const registro = await datos.configuracion.get(clave);
   return registro?.valor ?? porDefecto;
 }
 
 export async function guardarConfiguracion(
-  db: BaseDatos,
+  datos: DatosQoriGo,
   clave: string,
   valor: string,
 ): Promise<void> {
-  await db.configuracion.put({ clave, valor });
+  await datos.configuracion.put({ clave, valor });
 }

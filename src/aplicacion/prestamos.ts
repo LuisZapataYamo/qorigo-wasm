@@ -1,6 +1,6 @@
-import type { BaseDatos } from '../db/baseDatos';
-import type { CuotaPrestamo, Persona, Prestamo } from '../db/tipos';
-import { auditar } from '../db/auditoria';
+import type { DatosQoriGo } from './puertos/persistencia';
+import type { CuotaPrestamo, Persona, Prestamo } from '../dominio/modelo';
+import { auditar } from './auditoria';
 import { aCentimos } from '../dominio/dinero';
 import {
   ErrorNoEncontrado,
@@ -62,7 +62,7 @@ export interface OpcionesCreacionPrestamo {
 }
 
 export async function crearPrestamo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   entrada: EntradaPrestamo,
   opciones: OpcionesCreacionPrestamo = {},
 ): Promise<PrestamoCreado> {
@@ -165,7 +165,7 @@ export interface ResultadoPrestamoPersonaNueva {
 
 /** RF-PRE-01 / CU-01: crear la persona desde el alta del préstamo. */
 export async function crearPrestamoConPersonaNueva(
-  db: BaseDatos,
+  db: DatosQoriGo,
   datosPersona: EntradaPersona,
   datosPrestamo: Omit<EntradaPrestamo, 'personaId'>,
   resolucionSimilar?: ResolucionSimilar,
@@ -187,7 +187,7 @@ export async function crearPrestamoConPersonaNueva(
 }
 
 export async function obtenerPrestamo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<Prestamo> {
   const prestamo = await db.prestamos.get(id);
@@ -199,7 +199,7 @@ export interface PrestamoListado extends Prestamo {
   persona: string;
 }
 
-export async function listarPrestamos(db: BaseDatos): Promise<PrestamoListado[]> {
+export async function listarPrestamos(db: DatosQoriGo): Promise<PrestamoListado[]> {
   const [prestamos, personas] = await Promise.all([
     db.prestamos.toArray(),
     db.personas.toArray(),
@@ -219,7 +219,7 @@ export async function listarPrestamos(db: BaseDatos): Promise<PrestamoListado[]>
 }
 
 export async function cuotasDePrestamo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
 ): Promise<CuotaPrestamo[]> {
   const cuotas = await db.cuotasPrestamo
@@ -255,7 +255,7 @@ export interface EntradaAjusteCuota {
  * se redistribuye entre las cuotas posteriores para que el total no cambie.
  */
 export async function ajustarCuota(
-  db: BaseDatos,
+  db: DatosQoriGo,
   cuotaId: string,
   entrada: EntradaAjusteCuota,
 ): Promise<CuotaPrestamo[]> {
@@ -420,7 +420,7 @@ export async function ajustarCuota(
 }
 
 export async function cambiarCumplimiento(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
   estrictoCumplimiento: boolean,
   usuarioId?: string,
@@ -462,7 +462,7 @@ export interface ExigiblePrestamo {
  * Flexible: solo cuenta la cuota del mes; lo atrasado se informa aparte.
  */
 export async function exigibleDelMes(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
   periodo: string = periodoActual(),
 ): Promise<ExigiblePrestamo> {
@@ -503,7 +503,7 @@ export async function exigibleDelMes(
 /* ------------------------------- CU-11 ------------------------------- */
 
 export async function marcarIncobrable(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
   motivo: string,
   usuarioId?: string,
@@ -542,7 +542,7 @@ export async function marcarIncobrable(
 }
 
 export async function anularPrestamo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
   motivo?: string,
   usuarioId?: string,
@@ -603,7 +603,7 @@ export interface ResumenPrestamo {
 }
 
 export async function resumenPrestamo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   prestamoId: string,
 ): Promise<ResumenPrestamo> {
   const prestamo = await obtenerPrestamo(db, prestamoId);

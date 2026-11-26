@@ -1,6 +1,5 @@
-import type { Table } from 'dexie';
-import type { BaseDatos } from '../db/baseDatos';
-import type { ComprobantePago } from '../db/tipos';
+import type { DatosQoriGo, Tabla } from './puertos/persistencia';
+import type { ComprobantePago } from '../dominio/modelo';
 import {
   ErrorConflicto,
   ErrorValidacion,
@@ -431,7 +430,7 @@ function claveDePrimaria(
 }
 
 async function comprobantesLocales(
-  db: BaseDatos,
+  db: DatosQoriGo,
 ): Promise<Map<string, Record<string, unknown>>> {
   const registros = await db.comprobantesPago.toArray();
   return new Map(
@@ -472,7 +471,7 @@ function aComprobantePago(
  * Un conflicto de contenido cancela la importación sin sobrescribir nada.
  */
 export async function importarDatos(
-  db: BaseDatos,
+  db: DatosQoriGo,
   datos: unknown,
   opciones: OpcionesImportacion,
 ): Promise<ResultadoImportacion> {
@@ -581,9 +580,9 @@ export async function importarDatos(
 }
 
 function tablaDe(
-  db: BaseDatos,
+  db: DatosQoriGo,
   coleccion: NombreColeccion,
-): Table<Record<string, unknown>, string> {
+): Tabla<Record<string, unknown>> {
   const tabla = (() => {
     switch (coleccion) {
       case 'personas':
@@ -618,5 +617,5 @@ function tablaDe(
         return db.auditoria;
     }
   })();
-  return tabla as unknown as Table<Record<string, unknown>, string>;
+  return tabla as unknown as Tabla<Record<string, unknown>>;
 }

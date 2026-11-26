@@ -1,12 +1,12 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   MiembroSuscripcion,
   Pago,
   Persona,
   Prestamo,
   Suscripcion,
-} from '../db/tipos';
-import { auditar } from '../db/auditoria';
+} from '../dominio/modelo';
+import { auditar } from './auditoria';
 import {
   ErrorConflicto,
   ErrorNoEncontrado,
@@ -96,7 +96,7 @@ export function sonSimilares(a: Persona, b: EntradaPersona): boolean {
 }
 
 export async function buscarPorDocumento(
-  db: BaseDatos,
+  db: DatosQoriGo,
   documento: string,
 ): Promise<Persona | undefined> {
   const limpio = documento.trim();
@@ -105,7 +105,7 @@ export async function buscarPorDocumento(
 }
 
 export async function buscarSimilares(
-  db: BaseDatos,
+  db: DatosQoriGo,
   entrada: EntradaPersona,
 ): Promise<Persona[]> {
   const personas = await db.personas.toArray();
@@ -144,7 +144,7 @@ function validar(entrada: EntradaPersona): {
  * nombres similares. La decisión de similitud se resuelve explícitamente.
  */
 export async function registrarPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   entrada: EntradaPersona,
   opciones: OpcionesRegistro = {},
 ): Promise<ResultadoRegistroPersona> {
@@ -211,7 +211,7 @@ export interface FiltroPersonas {
 }
 
 export async function obtenerPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<Persona> {
   const persona = await db.personas.get(id);
@@ -220,7 +220,7 @@ export async function obtenerPersona(
 }
 
 export async function listarPersonas(
-  db: BaseDatos,
+  db: DatosQoriGo,
   filtro: FiltroPersonas = {},
 ): Promise<Pagina<Persona>> {
   const busqueda = normalizar(filtro.busqueda ?? '');
@@ -245,7 +245,7 @@ export async function listarPersonas(
 }
 
 export async function editarPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
   cambios: Partial<EntradaPersona>,
 ): Promise<Persona> {
@@ -301,7 +301,7 @@ export async function editarPersona(
 }
 
 export async function desactivarPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<Persona> {
   const anterior = await obtenerPersona(db, id);
@@ -321,7 +321,7 @@ export async function desactivarPersona(
 }
 
 export async function reactivarPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<Persona> {
   const anterior = await obtenerPersona(db, id);
@@ -342,7 +342,7 @@ export async function reactivarPersona(
 
 /** Cuenta membresías, préstamos y pagos que impiden borrar una persona. */
 export async function movimientosDePersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<number> {
   const [miembros, prestamos, pagos] = await Promise.all([
@@ -354,7 +354,7 @@ export async function movimientosDePersona(
 }
 
 export async function eliminarPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<void> {
   const persona = await obtenerPersona(db, id);
@@ -389,7 +389,7 @@ export interface FichaPersona {
 }
 
 export async function consultarFichaPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<FichaPersona> {
   const persona = await obtenerPersona(db, id);

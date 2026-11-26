@@ -1,6 +1,6 @@
-import type { BaseDatos } from '../db/baseDatos';
-import type { MiembroSuscripcion, Persona } from '../db/tipos';
-import { auditar } from '../db/auditoria';
+import type { DatosQoriGo } from './puertos/persistencia';
+import type { MiembroSuscripcion, Persona } from '../dominio/modelo';
+import { auditar } from './auditoria';
 import { aCentimos } from '../dominio/dinero';
 import {
   ErrorConflicto,
@@ -31,7 +31,7 @@ export interface MiembroAgregado {
 }
 
 export async function agregarMiembro(
-  db: BaseDatos,
+  db: DatosQoriGo,
   suscripcionId: string,
   entrada: EntradaMiembro,
 ): Promise<MiembroAgregado> {
@@ -154,7 +154,7 @@ export interface ResultadoPersonaNuevaMiembro {
 
 /** RF-SUS-04 / CU-01: permite crear la persona desde el alta del miembro. */
 export async function agregarMiembroConPersonaNueva(
-  db: BaseDatos,
+  db: DatosQoriGo,
   suscripcionId: string,
   datosPersona: EntradaPersona,
   datosMiembro: Omit<EntradaMiembro, 'personaId'>,
@@ -185,7 +185,7 @@ export interface MiembroConPersona {
 }
 
 export async function listarMiembros(
-  db: BaseDatos,
+  db: DatosQoriGo,
   suscripcionId: string,
 ): Promise<MiembroConPersona[]> {
   const miembros = await db.miembrosSuscripcion
@@ -207,7 +207,7 @@ export async function listarMiembros(
 
 /** Detalle actualizado tras el alta, útil para mostrar la cobertura. */
 export async function coberturaActual(
-  db: BaseDatos,
+  db: DatosQoriGo,
   suscripcionId: string,
 ): Promise<number> {
   const detalle = await detalleSuscripcion(db, suscripcionId);
@@ -222,7 +222,7 @@ export interface CambiosMiembro {
 }
 
 export async function obtenerMiembro(
-  db: BaseDatos,
+  db: DatosQoriGo,
   miembroId: string,
 ): Promise<MiembroSuscripcion> {
   const miembro = await db.miembrosSuscripcion.get(miembroId);
@@ -235,7 +235,7 @@ export async function obtenerMiembro(
  * monto rige desde el siguiente periodo que se genere (RN-S06).
  */
 export async function actualizarMiembro(
-  db: BaseDatos,
+  db: DatosQoriGo,
   miembroId: string,
   cambios: CambiosMiembro,
 ): Promise<MiembroSuscripcion> {
@@ -292,7 +292,7 @@ export async function actualizarMiembro(
  * cargos desde el periodo siguiente a la fecha de fin (RN-S08).
  */
 export async function darDeBajaMiembro(
-  db: BaseDatos,
+  db: DatosQoriGo,
   miembroId: string,
   fechaFin: string,
 ): Promise<MiembroSuscripcion> {
@@ -336,7 +336,7 @@ export async function darDeBajaMiembro(
 }
 
 export async function reactivarMiembro(
-  db: BaseDatos,
+  db: DatosQoriGo,
   miembroId: string,
 ): Promise<MiembroSuscripcion> {
   const anterior = await obtenerMiembro(db, miembroId);

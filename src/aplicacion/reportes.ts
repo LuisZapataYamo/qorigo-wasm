@@ -1,4 +1,4 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   AplicacionPago,
   CargoSuscripcion,
@@ -11,7 +11,7 @@ import type {
   Prestamo,
   Suscripcion,
   CausaPerdida,
-} from '../db/tipos';
+} from '../dominio/modelo';
 import {
   diasEntre,
   finDeMes,
@@ -46,7 +46,7 @@ export interface ContextoReportes {
   mapaCargos: Map<string, CargoSuscripcion>;
 }
 
-export async function cargarContexto(db: BaseDatos): Promise<ContextoReportes> {
+export async function cargarContexto(db: DatosQoriGo): Promise<ContextoReportes> {
   const [
     personas,
     plataformas,
@@ -265,7 +265,7 @@ function calcularBalance(
 }
 
 export async function balanceMensual(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<BalanceMes> {
@@ -274,7 +274,7 @@ export async function balanceMensual(
 }
 
 export async function serieBalance(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodoFinal: string = periodoActual(),
   moneda = 'PEN',
   cantidad = 12,
@@ -501,7 +501,7 @@ export interface Dashboard {
 }
 
 export async function dashboard(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<Dashboard> {
@@ -661,7 +661,7 @@ function lineaSuscripcion(
 }
 
 export async function informeSuscripciones(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<LineaSuscripcion[]> {
@@ -679,7 +679,7 @@ export async function informeSuscripciones(
 
 /** Solo las que pierden y no son de uso personal. */
 export async function informePerdidasSuscripciones(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<LineaSuscripcion[]> {
@@ -821,7 +821,7 @@ function lineaPrestamo(
 }
 
 export async function informePrestamos(
-  db: BaseDatos,
+  db: DatosQoriGo,
   moneda?: string,
 ): Promise<LineaPrestamo[]> {
   const ctx = await cargarContexto(db);
@@ -881,7 +881,7 @@ export interface InformeRentabilidad {
 }
 
 export async function rentabilidad(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<InformeRentabilidad> {
@@ -1172,7 +1172,7 @@ function obligacionesVencidas(
 }
 
 export async function cobranza(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string = periodoActual(),
   moneda = 'PEN',
 ): Promise<Cobranza> {

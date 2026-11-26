@@ -1,9 +1,9 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   RecordatorioEnviado,
   TipoObligacion,
-} from '../db/tipos';
-import { guardarConfiguracion, leerConfiguracion } from '../db/auditoria';
+} from '../dominio/modelo';
+import { guardarConfiguracion, leerConfiguracion } from './auditoria';
 import { formatearMoneda } from '../dominio/dinero';
 import {
   diasEntre,
@@ -51,7 +51,7 @@ function tituloPrestamo(momento: MomentoRecordatorio) {
  * suscripciones. Usa solo datos locales: funciona sin internet.
  */
 export async function calcularRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
   opciones: { hoy?: string; diasAviso?: number } = {},
 ): Promise<Recordatorio[]> {
   const hoy = opciones.hoy ?? hoyActual();
@@ -251,7 +251,7 @@ export interface OpcionesEjecucion {
  * aplicación está abierta o activa; no hay push desde un servidor.
  */
 export async function ejecutarRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
   opciones: OpcionesEjecucion = {},
 ): Promise<ResultadoRecordatorios> {
   const activas =
@@ -308,7 +308,7 @@ export async function ejecutarRecordatorios(
 /* --------------------------- Configuración ------------------------ */
 
 export async function activarRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
   diasAviso = 3,
 ): Promise<EstadoPermiso> {
   const permiso = await solicitarPermisoNotificaciones();
@@ -321,12 +321,12 @@ export async function activarRecordatorios(
   return permiso;
 }
 
-export async function desactivarRecordatorios(db: BaseDatos): Promise<void> {
+export async function desactivarRecordatorios(db: DatosQoriGo): Promise<void> {
   await guardarConfiguracion(db, 'notificaciones_activas', 'NO');
 }
 
 export async function guardarDiasRecordatorio(
-  db: BaseDatos,
+  db: DatosQoriGo,
   dias: number,
 ): Promise<void> {
   const valor = Math.max(0, Math.min(30, Math.round(dias)));

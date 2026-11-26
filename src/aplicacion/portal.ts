@@ -1,11 +1,11 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   EstadoCargo,
   EstadoCuota,
   Pago,
   Persona,
   Prestamo,
-} from '../db/tipos';
+} from '../dominio/modelo';
 import { ErrorNoEncontrado } from '../dominio/errores';
 import { cargarAuxiliaresSaldos, pagadoDeCargo, pagadoDeCuota } from './saldos';
 
@@ -67,7 +67,7 @@ export interface VistaPersona {
  * identificadores ajenos se comportan como inexistentes (ver CU-16).
  */
 export async function consultarVistaPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   personaId: string,
 ): Promise<VistaPersona> {
   const persona = await db.personas.get(personaId);
