@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   anularPago,
   listarPagos,
@@ -12,7 +12,7 @@ import {
 import {
   procesarComprobante,
   type ComprobanteProcesado,
-} from '../../aplicacion/comprobantes';
+} from '../../infraestructura/imagen/comprobantes';
 import { aCentimos, aSoles, formatearMoneda } from '../../dominio/dinero';
 import { formatearFecha, hoy } from '../../dominio/fechas';
 import { ErrorConflicto, mensajeDeError } from '../../dominio/errores';import { nombreCompleto } from '../../dominio/nombres';
@@ -20,7 +20,7 @@ import type {
   ComprobantePago,
   ObligacionPendiente,
   TipoObligacion,
-} from '../../db/tipos';import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
+} from '../../dominio/modelo';import { Aviso, Campo, Etiqueta, Vacio } from '../componentes';
 
 export function Pagos() {
   const [personaId, setPersonaId] = useState('');

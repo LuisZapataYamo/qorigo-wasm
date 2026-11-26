@@ -1,11 +1,11 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   EstadoSuscripcion,
   MiembroSuscripcion,
   Plataforma,
   Suscripcion,
-} from '../db/tipos';
-import { auditar } from '../db/auditoria';
+} from '../dominio/modelo';
+import { auditar } from './auditoria';
 import { aCentimos } from '../dominio/dinero';
 import {
   ErrorNoEncontrado,
@@ -53,7 +53,7 @@ function validarDiaCobro(dia: number): void {
 }
 
 export async function costoVigentePara(
-  db: BaseDatos,
+  db: DatosQoriGo,
   suscripcionId: string,
   periodo: string,
 ): Promise<number> {
@@ -68,7 +68,7 @@ export async function costoVigentePara(
 }
 
 export async function crearSuscripcion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   entrada: EntradaSuscripcion,
 ): Promise<Suscripcion> {
   const nombre = entrada.nombre?.trim() ?? '';
@@ -129,7 +129,7 @@ export async function crearSuscripcion(
 }
 
 export async function obtenerSuscripcion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
 ): Promise<Suscripcion> {
   const suscripcion = await db.suscripciones.get(id);
@@ -138,7 +138,7 @@ export async function obtenerSuscripcion(
 }
 
 export async function listarSuscripciones(
-  db: BaseDatos,
+  db: DatosQoriGo,
   filtro: { busqueda?: string; estado?: EstadoSuscripcion | 'TODAS' } = {},
 ): Promise<Array<Suscripcion & { plataforma: string }>> {
   const busqueda = normalizar(filtro.busqueda ?? '');
@@ -162,7 +162,7 @@ export async function listarSuscripciones(
 }
 
 export async function detalleSuscripcion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
   periodo = periodoActual(),
 ): Promise<DetalleSuscripcion> {
@@ -226,7 +226,7 @@ export interface CambiosSuscripcion {
 }
 
 export async function actualizarSuscripcion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   id: string,
   cambios: CambiosSuscripcion,
 ): Promise<Suscripcion> {

@@ -1,5 +1,5 @@
-import { ErrorValidacion } from '../dominio/errores';
-import type { ComprobanteProcesado } from './pagos';
+import { ErrorValidacion } from '../../dominio/errores';
+import type { ComprobanteProcesado } from '../../aplicacion/puertos/imagen';
 
 export interface ImagenDecodificada {
   ancho: number;
@@ -8,7 +8,7 @@ export interface ImagenDecodificada {
   datos: Uint8ClampedArray;
 }
 
-export type { ComprobanteProcesado } from './pagos';
+export type { ComprobanteProcesado } from '../../aplicacion/puertos/imagen';
 
 export type Decodificador = (blob: Blob) => Promise<ImagenDecodificada>;
 
@@ -306,17 +306,4 @@ export async function procesarComprobante(
     alto: tamano,
     sha256,
   };
-}
-
-/** Devuelve la imagen del comprobante como base64 sin prefijo `data:`. */
-export async function comprobanteABase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binario = '';
-  const trozo = 0x8000;
-  for (let i = 0; i < bytes.length; i += trozo) {
-    binario += String.fromCharCode(
-      ...bytes.subarray(i, Math.min(i + trozo, bytes.length)),
-    );
-  }
-  return btoa(binario);
 }

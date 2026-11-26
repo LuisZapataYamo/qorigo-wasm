@@ -2,8 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './estilos.css';
-import { db } from './db/baseDatos';
-import { asegurarSemilla } from './db/semilla';
+import { db } from './infraestructura/persistencia/baseDatos';
+import { asegurarSemilla } from './infraestructura/persistencia/semilla';
 
 asegurarSemilla(db).catch((error) => {
   console.error('No se pudo preparar la base local', error);

@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
-import { crearBaseDeDatos, type BaseDatos } from '../db/baseDatos';
-import { asegurarSemilla } from '../db/semilla';
+import { crearBaseDeDatos, type BaseDatos } from '../infraestructura/persistencia/baseDatos';
+import { asegurarSemilla } from '../infraestructura/persistencia/semilla';
 
 let contador = 0;
 

@@ -1,6 +1,6 @@
-import type { BaseDatos } from '../db/baseDatos';
-import type { Suscripcion } from '../db/tipos';
-import { auditar } from '../db/auditoria';
+import type { DatosQoriGo } from './puertos/persistencia';
+import type { Suscripcion } from '../dominio/modelo';
+import { auditar } from './auditoria';
 import { ErrorValidacion } from '../dominio/errores';
 import {
   esFechaValida,
@@ -46,7 +46,7 @@ function validarPeriodo(periodo: string): string {
  * forma idempotente. Un error en una suscripción no impide procesar el resto.
  */
 export async function generarPeriodo(
-  db: BaseDatos,
+  db: DatosQoriGo,
   periodo: string,
   opciones: OpcionesGeneracion = {},
 ): Promise<ResultadoGeneracion> {

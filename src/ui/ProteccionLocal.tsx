@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/baseDatos';
+import { db } from '../infraestructura/persistencia/baseDatos';
 import { sesionActual } from '../aplicacion/sesion';
 import { Disposicion } from './Disposicion';
 import { PantallaAcceso } from './paginas/PantallaAcceso';

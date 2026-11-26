@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import { formatearMoneda } from '../../dominio/dinero';
 import {
   estimarAlmacenamiento,
   formatearBytes,
   persistenciaDisponible,
   solicitarPersistencia,
-} from '../../aplicacion/almacenamiento';
+} from '../../infraestructura/navegador/almacenamiento';
 import { Aviso } from '../componentes';
 
 interface EventoInstalacion extends Event {

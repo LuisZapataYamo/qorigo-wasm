@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import {
   ADVERTENCIA_EXPORTACION,
   exportarDatos,

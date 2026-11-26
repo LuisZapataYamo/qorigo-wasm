@@ -1,25 +1,26 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
-  RecordatorioEnviado,
-  TipoObligacion,
-} from '../db/tipos';
-import { guardarConfiguracion, leerConfiguracion } from '../db/auditoria';
-import { formatearMoneda } from '../dominio/dinero';
+  AvisoNotificacion,
+  EstadoPermiso,
+  Notificador,
+} from './puertos/notificador';
+import type { RecordatorioEnviado } from '../dominio/modelo';
 import {
-  diasEntre,
-  formatearFecha,
-  hoy as hoyActual,
-  periodoDe,
-  sumarDias,
-  vencimientoEnPeriodo,
-} from '../dominio/fechas';
+  calcularRecordatoriosPendientes,
+  type MomentoRecordatorio,
+  type RecordatorioPendiente,
+} from '../dominio/recordatorios';
+import { guardarConfiguracion, leerConfiguracion } from './auditoria';
+import { formatearMoneda } from '../dominio/dinero';
+import { formatearFecha, hoy as hoyActual } from '../dominio/fechas';
 import { cargarAuxiliaresSaldos, pagadoDeCargo, pagadoDeCuota } from './saldos';
 
-export type MomentoRecordatorio = 'AVISO' | 'HOY' | 'VENCIDO';
+export type { EstadoPermiso, Notificador } from './puertos/notificador';
+export type { MomentoRecordatorio } from '../dominio/recordatorios';
 
 export interface Recordatorio {
   clave: string;
-  tipo: TipoObligacion | 'FACTURACION';
+  tipo: 'SUSCRIPCION' | 'PRESTAMO' | 'FACTURACION';
   entidadId: string;
   titulo: string;
   cuerpo: string;
@@ -28,200 +29,89 @@ export interface Recordatorio {
   momento: MomentoRecordatorio;
 }
 
-function momentoDe(dias: number): MomentoRecordatorio {
-  if (dias < 0) return 'VENCIDO';
-  if (dias === 0) return 'HOY';
-  return 'AVISO';
+function tituloDe(pendiente: RecordatorioPendiente): string {
+  if (pendiente.tipo === 'FACTURACION') {
+    return `Día de cobro: ${pendiente.nombre}`;
+  }
+  if (pendiente.tipo === 'PRESTAMO') {
+    if (pendiente.momento === 'VENCIDO') return 'Cuota de préstamo vencida';
+    if (pendiente.momento === 'HOY') return 'Cuota de préstamo vence hoy';
+    return 'Cuota de préstamo próxima';
+  }
+  if (pendiente.momento === 'VENCIDO') {
+    return `Pago vencido: ${pendiente.nombre}`;
+  }
+  if (pendiente.momento === 'HOY') {
+    return `Cobro de suscripción hoy: ${pendiente.nombre}`;
+  }
+  return `Cobro próximo: ${pendiente.nombre}`;
 }
 
-function tituloSuscripcion(momento: MomentoRecordatorio, nombre: string) {
-  if (momento === 'VENCIDO') return `Pago vencido: ${nombre}`;
-  if (momento === 'HOY') return `Cobro de suscripción hoy: ${nombre}`;
-  return `Cobro próximo: ${nombre}`;
+function cuerpoDe(pendiente: RecordatorioPendiente): string {
+  const monto = formatearMoneda(pendiente.montoCentimos, pendiente.moneda);
+  const fecha = formatearFecha(pendiente.fechaVencimiento);
+
+  if (pendiente.tipo === 'FACTURACION') {
+    return `Costo ${monto} · ${fecha}. Genera los cargos del periodo si aún no lo hiciste.`;
+  }
+  const persona = pendiente.personaNombre ?? 'Miembro';
+  if (pendiente.tipo === 'PRESTAMO') {
+    return `${persona} · ${pendiente.detalle ?? 'Cuota'} · ${monto} · vence ${fecha}.`;
+  }
+  return `${persona}: ${monto} · vence ${fecha}.`;
 }
 
-function tituloPrestamo(momento: MomentoRecordatorio) {
-  if (momento === 'VENCIDO') return 'Cuota de préstamo vencida';
-  if (momento === 'HOY') return 'Cuota de préstamo vence hoy';
-  return 'Cuota de préstamo próxima';
+function aRecordatorio(pendiente: RecordatorioPendiente): Recordatorio {
+  return {
+    clave: pendiente.clave,
+    tipo: pendiente.tipo,
+    entidadId: pendiente.entidadId,
+    titulo: tituloDe(pendiente),
+    cuerpo: cuerpoDe(pendiente),
+    fechaVencimiento: pendiente.fechaVencimiento,
+    dias: pendiente.dias,
+    momento: pendiente.momento,
+  };
 }
 
 /**
- * Revisa las obligaciones pendientes y las fechas de facturación de las
- * suscripciones. Usa solo datos locales: funciona sin internet.
+ * Revisa las obligaciones pendientes y las fechas de facturación. Usa solo
+ * datos locales: funciona sin internet.
  */
 export async function calcularRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
   opciones: { hoy?: string; diasAviso?: number } = {},
 ): Promise<Recordatorio[]> {
-  const hoy = opciones.hoy ?? hoyActual();
-  const diasAviso = Math.max(0, Math.min(30, opciones.diasAviso ?? 3));
-  const limite = sumarDias(hoy, diasAviso);
-  const aux = await cargarAuxiliaresSaldos(db);
+  const [
+    cargos,
+    miembros,
+    suscripciones,
+    personas,
+    prestamos,
+    cuotas,
+    aux,
+  ] = await Promise.all([
+    db.cargosSuscripcion.toArray(),
+    db.miembrosSuscripcion.toArray(),
+    db.suscripciones.toArray(),
+    db.personas.toArray(),
+    db.prestamos.toArray(),
+    db.cuotasPrestamo.toArray(),
+    cargarAuxiliaresSaldos(db),
+  ]);
 
-  const [cargos, miembros, suscripciones, personas, prestamos, cuotas] =
-    await Promise.all([
-      db.cargosSuscripcion.toArray(),
-      db.miembrosSuscripcion.toArray(),
-      db.suscripciones.toArray(),
-      db.personas.toArray(),
-      db.prestamos.toArray(),
-      db.cuotasPrestamo.toArray(),
-    ]);
-
-  const mapaMiembros = new Map(miembros.map((m) => [m.id, m]));
-  const mapaSuscripciones = new Map(suscripciones.map((s) => [s.id, s]));
-  const mapaPersonas = new Map(personas.map((p) => [p.id, p]));
-  const mapaPrestamos = new Map(prestamos.map((p) => [p.id, p]));
-  const recordatorios: Recordatorio[] = [];
-  const periodosConCargos = new Set<string>();
-
-  for (const cargo of cargos) {
-    if (cargo.periodo === periodoDe(hoy)) {
-      const miembro = mapaMiembros.get(cargo.miembroId);
-      if (miembro) {
-        periodosConCargos.add(`${miembro.suscripcionId}:${cargo.periodo}`);
-      }
-    }
-  }
-
-  for (const cargo of cargos) {
-    if (cargo.estado === 'ANULADO' || cargo.estado === 'PAGADO') continue;
-    const miembro = mapaMiembros.get(cargo.miembroId);
-    const suscripcion = miembro
-      ? mapaSuscripciones.get(miembro.suscripcionId)
-      : undefined;
-    if (!miembro || !suscripcion) continue;
-
-    const saldo = Math.max(0, cargo.montoCentimos - pagadoDeCargo(aux, cargo.id));
-    if (saldo <= 0) continue;
-    if (cargo.fechaVencimiento > limite) continue;
-
-    const dias = diasEntre(hoy, cargo.fechaVencimiento);
-    const momento = momentoDe(dias);
-    const persona = mapaPersonas.get(miembro.personaId);
-    recordatorios.push({
-      clave: `CARGO:${cargo.id}:${cargo.fechaVencimiento}:${momento}`,
-      tipo: 'SUSCRIPCION',
-      entidadId: cargo.id,
-      titulo: tituloSuscripcion(momento, suscripcion.nombre),
-      cuerpo: `${persona ? `${persona.apellidos}, ${persona.nombres}` : 'Miembro'}: ${formatearMoneda(saldo, suscripcion.moneda)} · vence ${formatearFecha(cargo.fechaVencimiento)}.`,
-      fechaVencimiento: cargo.fechaVencimiento,
-      dias,
-      momento,
-    });
-  }
-
-  for (const cuota of cuotas) {
-    if (cuota.estado === 'PAGADA') continue;
-    const prestamo = mapaPrestamos.get(cuota.prestamoId);
-    if (!prestamo || prestamo.estado !== 'ACTIVO') continue;
-
-    const saldo = Math.max(
-      0,
-      cuota.montoProgramadoCentimos - pagadoDeCuota(aux, cuota.id),
-    );
-    if (saldo <= 0) continue;
-    if (cuota.fechaVencimiento > limite) continue;
-
-    const dias = diasEntre(hoy, cuota.fechaVencimiento);
-    const momento = momentoDe(dias);
-    const persona = mapaPersonas.get(prestamo.personaId);
-    recordatorios.push({
-      clave: `CUOTA:${cuota.id}:${cuota.fechaVencimiento}:${momento}`,
-      tipo: 'PRESTAMO',
-      entidadId: cuota.id,
-      titulo: tituloPrestamo(momento),
-      cuerpo: `${persona ? `${persona.apellidos}, ${persona.nombres}` : 'Titular'} · cuota ${cuota.numeroCuota}/${prestamo.plazoMeses} · ${formatearMoneda(saldo, prestamo.moneda)} · vence ${formatearFecha(cuota.fechaVencimiento)}.`,
-      fechaVencimiento: cuota.fechaVencimiento,
-      dias,
-      momento,
-    });
-  }
-
-  // Día de facturación de suscripciones cuyo periodo todavía no tiene cargos.
-  for (const suscripcion of suscripciones) {
-    if (suscripcion.estado !== 'ACTIVA') continue;
-    if (suscripcion.fechaInicio > hoy) continue;
-    const periodo = periodoDe(hoy);
-    if (periodosConCargos.has(`${suscripcion.id}:${periodo}`)) continue;
-
-    const fechaCobro = vencimientoEnPeriodo(periodo, suscripcion.diaCobro);
-    if (fechaCobro < hoy || fechaCobro > limite) continue;
-
-    const dias = diasEntre(hoy, fechaCobro);
-    const momento = momentoDe(dias);
-    recordatorios.push({
-      clave: `FACTURACION:${suscripcion.id}:${fechaCobro}:${momento}`,
-      tipo: 'FACTURACION',
-      entidadId: suscripcion.id,
-      titulo: `Día de cobro: ${suscripcion.nombre}`,
-      cuerpo: `Costo ${formatearMoneda(suscripcion.costoCentimos, suscripcion.moneda)} · ${formatearFecha(fechaCobro)}. Genera los cargos del periodo si aún no lo hiciste.`,
-      fechaVencimiento: fechaCobro,
-      dias,
-      momento,
-    });
-  }
-
-  return recordatorios.sort((a, b) => {
-    if (a.fechaVencimiento !== b.fechaVencimiento) {
-      return a.fechaVencimiento.localeCompare(b.fechaVencimiento);
-    }
-    return a.titulo.localeCompare(b.titulo, 'es');
-  });
-}
-
-/* ---------------------------- Permisos ---------------------------- */
-
-export type EstadoPermiso = NotificationPermission | 'no_soportado';
-
-export function notificacionesSoportadas(): boolean {
-  return typeof Notification !== 'undefined';
-}
-
-export function permisoNotificaciones(): EstadoPermiso {
-  if (!notificacionesSoportadas()) return 'no_soportado';
-  return Notification.permission;
-}
-
-export async function solicitarPermisoNotificaciones(): Promise<EstadoPermiso> {
-  if (!notificacionesSoportadas()) return 'no_soportado';
-  try {
-    return await Notification.requestPermission();
-  } catch {
-    return 'denied';
-  }
-}
-
-/* --------------------------- Mostrar aviso ------------------------ */
-
-export async function mostrarNotificacionNavegador(
-  recordatorio: Recordatorio,
-): Promise<void> {
-  if (!notificacionesSoportadas()) {
-    throw new Error('Este navegador no admite notificaciones.');
-  }
-  if (Notification.permission !== 'granted') {
-    throw new Error('Falta el permiso de notificaciones.');
-  }
-
-  const opciones: NotificationOptions = {
-    body: recordatorio.cuerpo,
-    icon: './icono-192.png',
-    badge: './icono-192.png',
-    tag: recordatorio.clave,
-    data: { url: './#/pagos' },
-  };
-
-  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-    const registro = await navigator.serviceWorker.getRegistration();
-    if (registro?.active) {
-      await registro.showNotification(recordatorio.titulo, opciones);
-      return;
-    }
-  }
-
-  new Notification(recordatorio.titulo, opciones);
+  return calcularRecordatoriosPendientes({
+    hoy: opciones.hoy ?? hoyActual(),
+    diasAviso: opciones.diasAviso ?? 3,
+    cargos,
+    miembros,
+    suscripciones,
+    personas,
+    prestamos,
+    cuotas,
+    pagadoCargo: (id) => pagadoDeCargo(aux, id),
+    pagadoCuota: (id) => pagadoDeCuota(aux, id),
+  }).map(aRecordatorio);
 }
 
 /* ---------------------------- Ejecución --------------------------- */
@@ -241,24 +131,31 @@ export interface ResultadoRecordatorios {
 
 export interface OpcionesEjecucion {
   hoy?: string;
-  permiso?: EstadoPermiso;
-  mostrar?: (recordatorio: Recordatorio) => Promise<void>;
+  notificador?: Notificador;
 }
 
+const NOTIFICADOR_NULO: Notificador = {
+  permiso: () => 'no_soportado',
+  solicitarPermiso: async () => 'no_soportado',
+  mostrar: async () => {
+    throw new Error('No hay un notificador configurado.');
+  },
+};
+
 /**
- * Envía los recordatorios nuevos. Se apoya en datos locales, así que no
- * necesita internet. El navegador solo ejecuta esta revisión mientras la
- * aplicación está abierta o activa; no hay push desde un servidor.
+ * Envía los recordatorios nuevos. Necesita un adaptador de notificaciones;
+ * el contenedor de la interfaz inyecta el del navegador.
  */
 export async function ejecutarRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
   opciones: OpcionesEjecucion = {},
 ): Promise<ResultadoRecordatorios> {
   const activas =
     (await leerConfiguracion(db, 'notificaciones_activas', 'NO')) === 'SI';
   if (!activas) return { enviados: 0, omitidos: 0, motivo: 'desactivadas' };
 
-  const permiso = opciones.permiso ?? permisoNotificaciones();
+  const notificador = opciones.notificador ?? NOTIFICADOR_NULO;
+  const permiso = notificador.permiso();
   if (permiso === 'no_soportado') {
     return { enviados: 0, omitidos: 0, motivo: 'no_soportado' };
   }
@@ -277,7 +174,6 @@ export async function ejecutarRecordatorios(
     return { enviados: 0, omitidos: 0, motivo: 'sin_recordatorios' };
   }
 
-  const mostrar = opciones.mostrar ?? mostrarNotificacionNavegador;
   let enviados = 0;
   let omitidos = 0;
 
@@ -286,7 +182,12 @@ export async function ejecutarRecordatorios(
       omitidos += 1;
       continue;
     }
-    await mostrar(recordatorio);
+    const aviso: AvisoNotificacion = {
+      clave: recordatorio.clave,
+      titulo: recordatorio.titulo,
+      cuerpo: recordatorio.cuerpo,
+    };
+    await notificador.mostrar(aviso);
     const registro: RecordatorioEnviado = {
       clave: recordatorio.clave,
       tipo: recordatorio.tipo,
@@ -308,10 +209,11 @@ export async function ejecutarRecordatorios(
 /* --------------------------- Configuración ------------------------ */
 
 export async function activarRecordatorios(
-  db: BaseDatos,
+  db: DatosQoriGo,
+  notificador: Notificador,
   diasAviso = 3,
 ): Promise<EstadoPermiso> {
-  const permiso = await solicitarPermisoNotificaciones();
+  const permiso = await notificador.solicitarPermiso();
   await guardarConfiguracion(db, 'recordatorios_dias', String(diasAviso));
   await guardarConfiguracion(
     db,
@@ -321,12 +223,14 @@ export async function activarRecordatorios(
   return permiso;
 }
 
-export async function desactivarRecordatorios(db: BaseDatos): Promise<void> {
+export async function desactivarRecordatorios(
+  db: DatosQoriGo,
+): Promise<void> {
   await guardarConfiguracion(db, 'notificaciones_activas', 'NO');
 }
 
 export async function guardarDiasRecordatorio(
-  db: BaseDatos,
+  db: DatosQoriGo,
   dias: number,
 ): Promise<void> {
   const valor = Math.max(0, Math.min(30, Math.round(dias)));

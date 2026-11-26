@@ -1,6 +1,6 @@
-import type { BaseDatos } from '../db/baseDatos';
-import type { Rol, Usuario } from '../db/tipos';
-import { auditar, guardarConfiguracion } from '../db/auditoria';
+import type { DatosQoriGo } from './puertos/persistencia';
+import type { Rol, Usuario } from '../dominio/modelo';
+import { auditar, guardarConfiguracion } from './auditoria';
 import {
   ErrorNoEncontrado,
   ErrorReglaNegocio,
@@ -89,7 +89,7 @@ function validarPassword(password: string): void {
 }
 
 async function emailDisponible(
-  db: BaseDatos,
+  db: DatosQoriGo,
   email: string,
   exceptoId?: string,
 ): Promise<void> {
@@ -100,21 +100,21 @@ async function emailDisponible(
 }
 
 async function leerSesion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   clave: string,
 ): Promise<string | undefined> {
   return (await db.sesion.get(clave))?.valor;
 }
 
 async function guardarSesion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   clave: string,
   valor: string,
 ): Promise<void> {
   await db.sesion.put({ clave, valor });
 }
 
-async function borrarSesion(db: BaseDatos, clave: string): Promise<void> {
+async function borrarSesion(db: DatosQoriGo, clave: string): Promise<void> {
   await db.sesion.delete(clave);
 }
 
@@ -130,7 +130,7 @@ export interface DatosAcceso {
  * no una frontera de seguridad frente a quien controla el dispositivo.
  */
 export async function configurarAcceso(
-  db: BaseDatos,
+  db: DatosQoriGo,
   datos: DatosAcceso,
 ): Promise<Usuario> {
   const persona = await db.personas.get(datos.personaId);
@@ -176,7 +176,7 @@ export async function configurarAcceso(
 }
 
 export async function crearAccesoPersona(
-  db: BaseDatos,
+  db: DatosQoriGo,
   datos: DatosAcceso & { rol?: Rol },
 ): Promise<Usuario> {
   const persona = await db.personas.get(datos.personaId);
@@ -213,7 +213,7 @@ export async function crearAccesoPersona(
 }
 
 export async function iniciarSesion(
-  db: BaseDatos,
+  db: DatosQoriGo,
   email: string,
   password: string,
   ahora: Date = new Date(),
@@ -264,7 +264,7 @@ export async function iniciarSesion(
 }
 
 export async function sesionActual(
-  db: BaseDatos,
+  db: DatosQoriGo,
 ): Promise<Usuario | null> {
   const id = await leerSesion(db, 'usuario_actual');
   if (!id) return null;
@@ -273,16 +273,16 @@ export async function sesionActual(
   return usuario;
 }
 
-export async function cerrarSesion(db: BaseDatos): Promise<void> {
+export async function cerrarSesion(db: DatosQoriGo): Promise<void> {
   await borrarSesion(db, 'usuario_actual');
 }
 
-export async function listarUsuarios(db: BaseDatos): Promise<Usuario[]> {
+export async function listarUsuarios(db: DatosQoriGo): Promise<Usuario[]> {
   return db.usuarios.toArray();
 }
 
 export async function cambiarPassword(
-  db: BaseDatos,
+  db: DatosQoriGo,
   usuarioId: string,
   passwordActual: string,
   passwordNueva: string,

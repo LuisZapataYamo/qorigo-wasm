@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { db } from '../../db/baseDatos';
+import { db } from '../../infraestructura/persistencia/baseDatos';
 import { iniciarSesion } from '../../aplicacion/sesion';
 import { mensajeDeError } from '../../dominio/errores';
 import { Aviso } from '../componentes';

@@ -1,14 +1,18 @@
-import type { AplicacionPago, Pago } from '../db/tipos';
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
+import type { AuxiliaresSaldos } from '../dominio/saldos';
 
-export interface AuxiliaresSaldos {
-  pagosRegistrados: Set<string>;
-  aplicaciones: AplicacionPago[];
-}
+export type { AuxiliaresSaldos } from '../dominio/saldos';
+export {
+  aplicacionesDeCargo,
+  aplicacionesDeCuota,
+  esPagoValido,
+  pagadoDeCargo,
+  pagadoDeCuota,
+} from '../dominio/saldos';
 
 /** Carga una sola vez los pagos válidos y sus aplicaciones. */
 export async function cargarAuxiliaresSaldos(
-  db: BaseDatos,
+  db: DatosQoriGo,
 ): Promise<AuxiliaresSaldos> {
   const [pagos, aplicaciones] = await Promise.all([
     db.pagos.toArray(),
@@ -20,46 +24,4 @@ export async function cargarAuxiliaresSaldos(
     ),
     aplicaciones,
   };
-}
-
-export function aplicacionesDeCargo(
-  aux: AuxiliaresSaldos,
-  cargoId: string,
-): AplicacionPago[] {
-  return aux.aplicaciones.filter(
-    (a) => a.cargoId === cargoId && aux.pagosRegistrados.has(a.pagoId),
-  );
-}
-
-export function aplicacionesDeCuota(
-  aux: AuxiliaresSaldos,
-  cuotaId: string,
-): AplicacionPago[] {
-  return aux.aplicaciones.filter(
-    (a) => a.cuotaId === cuotaId && aux.pagosRegistrados.has(a.pagoId),
-  );
-}
-
-export function pagadoDeCargo(
-  aux: AuxiliaresSaldos,
-  cargoId: string,
-): number {
-  return aplicacionesDeCargo(aux, cargoId).reduce(
-    (total, a) => total + a.montoAplicadoCentimos,
-    0,
-  );
-}
-
-export function pagadoDeCuota(
-  aux: AuxiliaresSaldos,
-  cuotaId: string,
-): number {
-  return aplicacionesDeCuota(aux, cuotaId).reduce(
-    (total, a) => total + a.montoAplicadoCentimos,
-    0,
-  );
-}
-
-export function esPagoValido(pago: Pago | undefined): boolean {
-  return pago?.estado === 'REGISTRADO';
 }

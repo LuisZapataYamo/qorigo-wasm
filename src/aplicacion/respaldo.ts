@@ -1,4 +1,4 @@
-import type { BaseDatos } from '../db/baseDatos';
+import type { DatosQoriGo } from './puertos/persistencia';
 import type {
   AplicacionPago,
   AuditoriaRegistro,
@@ -14,8 +14,8 @@ import type {
   Plataforma,
   Prestamo,
   Suscripcion,
-} from '../db/tipos';
-import { comprobanteABase64 } from './comprobantes';
+} from '../dominio/modelo';
+import { comprobanteABase64 } from './base64';
 
 export const FORMATO = 'qorigo-data';
 export const FORMAT_VERSION = 1;
@@ -81,7 +81,7 @@ export function configuracionExportable(
  * transmite nada a un servidor. Las credenciales de acceso local no se
  * exportan.
  */
-export async function exportarDatos(db: BaseDatos): Promise<PaqueteQoriGo> {
+export async function exportarDatos(db: DatosQoriGo): Promise<PaqueteQoriGo> {
   const [
     personas,
     monedas,

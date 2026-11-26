@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { BaseDatos } from '../db/baseDatos';
+import type { BaseDatos } from '../infraestructura/persistencia/baseDatos';
 import {
   cerrarSesion,
   configurarAcceso,
