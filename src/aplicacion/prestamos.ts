@@ -7,14 +7,19 @@ import {
   ErrorReglaNegocio,
   ErrorValidacion,
 } from '../dominio/errores';
-import { esFechaValida, finDeMes, periodoActual, sumarMeses } from '../dominio/fechas';
-import { diasEntre, hoy } from '../dominio/fechas';
+import { esFechaValida, hoy, periodoActual, sumarMeses } from '../dominio/fechas';
 import { nuevoId } from '../dominio/ids';
 import {
   calcularCronograma,
+  calcularExigible,
+  calcularResumenPrestamo,
+  repartirCapitalInteres,
   type CronogramaCalculado,
   type EntradaCalculo,
+  type ExigibleCalculado,
 } from '../dominio/prestamo';
+
+export type { ResumenPrestamo } from '../dominio/prestamo';
 import {
   registrarPersona,
   type EntradaPersona,
@@ -229,18 +234,6 @@ export async function cuotasDePrestamo(
   return cuotas.sort((a, b) => a.numeroCuota - b.numeroCuota);
 }
 
-/** Capital e interés se reparten en la proporción global C / T. */
-export function repartirCapitalInteres(
-  montoAplicado: number,
-  capitalCuota: number,
-  interesCuota: number,
-): { capital: number; interes: number } {
-  const total = capitalCuota + interesCuota;
-  if (total <= 0) return { capital: 0, interes: 0 };
-  const capital = Math.round((montoAplicado * capitalCuota) / total);
-  return { capital, interes: montoAplicado - capital };
-}
-
 /* ------------------------------- CU-10 ------------------------------- */
 
 export interface EntradaAjusteCuota {
@@ -448,13 +441,9 @@ export async function cambiarCumplimiento(
 
 /* ------------------------- Exigible del mes ------------------------- */
 
-export interface ExigiblePrestamo {
+export interface ExigiblePrestamo extends ExigibleCalculado {
   prestamoId: string;
   periodo: string;
-  saldoAnteriorCentimos: number;
-  cuotaMesCentimos: number;
-  exigibleCentimos: number;
-  atrasadoNoAcumuladoCentimos: number;
 }
 
 /**
@@ -469,35 +458,13 @@ export async function exigibleDelMes(
   const prestamo = await obtenerPrestamo(db, prestamoId);
   const cuotas = await cuotasDePrestamo(db, prestamo.id);
   const aux = await cargarAuxiliaresSaldos(db);
-  const fin = finDeMes(periodo);
-
-  let saldoAnterior = 0;
-  let cuotaMes = 0;
-  for (const cuota of cuotas) {
-    const saldo = Math.max(
-      0,
-      cuota.montoProgramadoCentimos - pagadoDeCuota(aux, cuota.id),
-    );
-    if (saldo <= 0) continue;
-    if (cuota.fechaVencimiento < periodo) {
-      saldoAnterior += saldo;
-    } else if (cuota.fechaVencimiento <= fin) {
-      cuotaMes += saldo;
-    }
-  }
-
-  return {
-    prestamoId,
+  const calculo = calcularExigible(
+    prestamo,
+    cuotas,
+    (cuotaId) => pagadoDeCuota(aux, cuotaId),
     periodo,
-    saldoAnteriorCentimos: saldoAnterior,
-    cuotaMesCentimos: cuotaMes,
-    exigibleCentimos: prestamo.estrictoCumplimiento
-      ? saldoAnterior + cuotaMes
-      : cuotaMes,
-    atrasadoNoAcumuladoCentimos: prestamo.estrictoCumplimiento
-      ? 0
-      : saldoAnterior,
-  };
+  );
+  return { prestamoId, periodo, ...calculo };
 }
 
 /* ------------------------------- CU-11 ------------------------------- */
@@ -587,97 +554,21 @@ export async function anularPrestamo(
   return actualizado;
 }
 
-export interface ResumenPrestamo {
-  prestamoId: string;
-  capitalCentimos: number;
-  totalProgramadoCentimos: number;
-  totalCobradoCentimos: number;
-  capitalRecuperadoCentimos: number;
-  interesCobradoCentimos: number;
-  saldoPendienteCentimos: number;
-  saldoVencidoCentimos: number;
-  diasMaxAtraso: number;
-  resultadoCentimos: number;
-  perdidaNetaCentimos: number;
-  marca: 'EN_RIESGO' | 'EN_PERDIDA' | null;
-}
-
 export async function resumenPrestamo(
   db: DatosQoriGo,
   prestamoId: string,
-): Promise<ResumenPrestamo> {
+): Promise<import('../dominio/prestamo').ResumenPrestamo> {
   const prestamo = await obtenerPrestamo(db, prestamoId);
   const cuotas = await cuotasDePrestamo(db, prestamo.id);
   const aux = await cargarAuxiliaresSaldos(db);
   const umbral = Number(
     (await db.configuracion.get('umbral_riesgo_dias'))?.valor ?? '30',
   );
-  const hoyTexto = hoy();
-
-  let totalProgramado = 0;
-  let totalCobrado = 0;
-  let saldoPendiente = 0;
-  let saldoVencido = 0;
-  let diasMaxAtraso = 0;
-
-  for (const cuota of cuotas) {
-    totalProgramado += cuota.montoProgramadoCentimos;
-    const aplicaciones = aplicacionesDeCuota(aux, cuota.id);
-    const pagado = aplicaciones.reduce(
-      (t, a) => t + a.montoAplicadoCentimos,
-      0,
-    );
-    const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
-    totalCobrado += pagado;
-    saldoPendiente += saldo;
-    if (saldo > 0 && cuota.fechaVencimiento < hoyTexto) {
-      saldoVencido += saldo;
-      diasMaxAtraso = Math.max(
-        diasMaxAtraso,
-        diasEntre(cuota.fechaVencimiento, hoyTexto),
-      );
-    }
-  }
-
-  const idsCuotas = new Set(cuotas.map((c) => c.id));
-  const aplicacionesDelPrestamo = aux.aplicaciones.filter(
-    (a) => a.cuotaId && idsCuotas.has(a.cuotaId),
+  return calcularResumenPrestamo(
+    prestamo,
+    cuotas,
+    (cuotaId) => aplicacionesDeCuota(aux, cuotaId),
+    hoy(),
+    umbral,
   );
-  const capitalRecuperado = aplicacionesDelPrestamo.reduce(
-    (total, a) => total + (a.montoCapitalCentimos ?? 0),
-    0,
-  );
-  const interesCobrado = aplicacionesDelPrestamo.reduce(
-    (total, a) => total + (a.montoInteresCentimos ?? 0),
-    0,
-  );
-
-  const perdidaNeta =
-    prestamo.estado === 'INCOBRABLE'
-      ? Math.max(0, prestamo.capitalCentimos - totalCobrado)
-      : 0;
-
-  const marca: ResumenPrestamo['marca'] =
-    prestamo.estado === 'INCOBRABLE'
-      ? 'EN_PERDIDA'
-      : prestamo.estado === 'ACTIVO' &&
-          saldoVencido > 0 &&
-          diasMaxAtraso > umbral
-        ? 'EN_RIESGO'
-        : null;
-
-  return {
-    prestamoId,
-    capitalCentimos: prestamo.capitalCentimos,
-    totalProgramadoCentimos: totalProgramado,
-    totalCobradoCentimos: totalCobrado,
-    capitalRecuperadoCentimos: capitalRecuperado,
-    interesCobradoCentimos: interesCobrado,
-    saldoPendienteCentimos: saldoPendiente,
-    saldoVencidoCentimos: saldoVencido,
-    diasMaxAtraso,
-    resultadoCentimos: totalCobrado - prestamo.capitalCentimos,
-    perdidaNetaCentimos: perdidaNeta,
-    marca,
-  };
 }

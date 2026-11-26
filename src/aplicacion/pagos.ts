@@ -16,7 +16,12 @@ import {
 } from '../dominio/errores';
 import { esFechaValida, etiquetaPeriodo } from '../dominio/fechas';
 import { nuevoId } from '../dominio/ids';
-import { repartirCapitalInteres } from './prestamos';
+import { repartirCapitalInteres } from '../dominio/prestamo';
+import {
+  estadoDeObligacion,
+  planificarAplicaciones,
+  totalAplicado,
+} from '../dominio/pagos';
 import { cargarAuxiliaresSaldos, pagadoDeCargo, pagadoDeCuota } from './saldos';
 
 export interface ComprobanteProcesado {
@@ -215,97 +220,18 @@ export async function registrarPago(
     entrada.personaId,
   );
   const aux = await cargarAuxiliaresSaldos(db);
-  const porId = new Map(obligaciones.map((o) => [o.id, o]));
 
-  const aplicacionesCalculadas: Array<{
-    obligacion: ObligacionPendiente;
-    montoCentimos: number;
-  }> = [];
-
-  if (entrada.aplicaciones && entrada.aplicaciones.length > 0) {
-    const acumulado = new Map<string, number>();
-    for (const solicitada of entrada.aplicaciones) {
-      const obligacion = porId.get(solicitada.obligacionId);
-      if (!obligacion) {
-        throw new ErrorNoEncontrado(
-          'La obligación no existe o ya está pagada.',
-        );
-      }
-      if (obligacion.tipo !== solicitada.tipo) {
-        throw new ErrorValidacion(
-          'El tipo de la obligación no coincide.',
-          'aplicaciones',
-        );
-      }
-      if (obligacion.moneda !== entrada.moneda) {
-        throw new ErrorValidacion(
-          'La moneda del pago no coincide con la obligación.',
-          'moneda',
-        );
-      }
-      const monto = aCentimos(solicitada.monto);
-      if (monto <= 0) {
-        throw new ErrorValidacion(
-          'Cada aplicación debe ser mayor que cero.',
-          'aplicaciones',
-        );
-      }
-      acumulado.set(
-        obligacion.id,
-        (acumulado.get(obligacion.id) ?? 0) + monto,
-      );
-    }
-    for (const [id, total] of acumulado) {
-      const obligacion = porId.get(id)!;
-      if (total > obligacion.saldoCentimos) {
-        throw new ErrorReglaNegocio(
-          `La aplicación supera el saldo de "${obligacion.concepto}".`,
-        );
-      }
-    }
-    const suma = [...acumulado.values()].reduce((a, b) => a + b, 0);
-    if (suma > montoCentimos) {
-      throw new ErrorReglaNegocio(
-        'La suma de aplicaciones supera el monto del pago.',
-      );
-    }
-    for (const [id, total] of acumulado) {
-      aplicacionesCalculadas.push({
-        obligacion: porId.get(id)!,
-        montoCentimos: total,
-      });
-    }
-  } else {
-    let restante = montoCentimos;
-    for (const obligacion of obligaciones) {
-      if (restante <= 0) break;
-      if (obligacion.moneda !== entrada.moneda) continue;
-      const aplicar = Math.min(obligacion.saldoCentimos, restante);
-      if (aplicar <= 0) continue;
-      aplicacionesCalculadas.push({ obligacion, montoCentimos: aplicar });
-      restante -= aplicar;
-    }
-  }
-
-  const sumaAplicada = aplicacionesCalculadas.reduce(
-    (total, a) => total + a.montoCentimos,
-    0,
+  const aplicacionesCalculadas = planificarAplicaciones(
+    obligaciones,
+    entrada.moneda,
+    montoCentimos,
+    entrada.aplicaciones?.map((solicitada) => ({
+      tipo: solicitada.tipo,
+      obligacionId: solicitada.obligacionId,
+      montoCentimos: aCentimos(solicitada.monto),
+    })),
   );
-  if (
-    sumaAplicada === 0 &&
-    obligaciones.length > 0 &&
-    !obligaciones.some((o) => o.moneda === entrada.moneda)
-  ) {
-    throw new ErrorValidacion(
-      'La moneda del pago no coincide con la de las obligaciones.',
-      'moneda',
-    );
-  }
-  if (sumaAplicada > montoCentimos) {
-    throw new ErrorReglaNegocio(
-      'La suma de aplicaciones supera el monto del pago.',
-    );
-  }
+  const sumaAplicada = totalAplicado(aplicacionesCalculadas);
 
   const pago: Pago = {
     id: nuevoId(),
@@ -387,17 +313,11 @@ export async function registrarPago(
         const pagado =
           obligacion.pagadoCentimos +
           (nuevosPorObligacion.get(obligacion.id) ?? 0);
-        const saldo = Math.max(0, obligacion.montoCentimos - pagado);
-        const estado =
-          saldo <= 0
-            ? obligacion.tipo === 'PRESTAMO'
-              ? 'PAGADA'
-              : 'PAGADO'
-            : pagado > 0
-              ? 'PARCIAL'
-              : obligacion.tipo === 'PRESTAMO'
-                ? 'PENDIENTE'
-                : 'PENDIENTE';
+        const estado = estadoDeObligacion(
+          obligacion.tipo,
+          obligacion.montoCentimos,
+          pagado,
+        );
         if (obligacion.tipo === 'PRESTAMO') {
           await db.cuotasPrestamo.update(obligacion.id, {
             estado: estado as 'PENDIENTE' | 'PARCIAL' | 'PAGADA',
@@ -608,18 +528,22 @@ export async function anularPago(
           const cargo = await db.cargosSuscripcion.get(aplicacion.cargoId);
           if (!cargo) continue;
           const pagado = pagadoRestante(cargo.id, 'cargoId');
-          const saldo = Math.max(0, cargo.montoCentimos - pagado);
-          const estado =
-            saldo <= 0 ? 'PAGADO' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+          const estado = estadoDeObligacion(
+            'SUSCRIPCION',
+            cargo.montoCentimos,
+            pagado,
+          );
           await db.cargosSuscripcion.update(cargo.id, { estado });
         }
         if (aplicacion.cuotaId) {
           const cuota = await db.cuotasPrestamo.get(aplicacion.cuotaId);
           if (!cuota) continue;
           const pagado = pagadoRestante(cuota.id, 'cuotaId');
-          const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
-          const estado =
-            saldo <= 0 ? 'PAGADA' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
+          const estado = estadoDeObligacion(
+            'PRESTAMO',
+            cuota.montoProgramadoCentimos,
+            pagado,
+          );
           await db.cuotasPrestamo.update(cuota.id, { estado });
           prestamosAfectados.add(cuota.prestamoId);
         }

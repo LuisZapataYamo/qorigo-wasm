@@ -1,6 +1,11 @@
 import { aCentimos } from './dinero';
 import { ErrorValidacion } from './errores';
-import { esFechaValida, sumarMeses } from './fechas';
+import { diasEntre, esFechaValida, finDeMes, sumarMeses } from './fechas';
+import type {
+  AplicacionPago,
+  CuotaPrestamo,
+  Prestamo,
+} from './modelo';
 
 export interface CuotaCalculada {
   numero: number;
@@ -100,5 +105,151 @@ export function calcularCronograma(
     interesTotalCentimos,
     totalCentimos,
     cuotas,
+  };
+}
+
+/** Reparte un monto de cuota entre capital e interés en su proporción. */
+export function repartirCapitalInteres(
+  montoAplicado: number,
+  capitalCuota: number,
+  interesCuota: number,
+): { capital: number; interes: number } {
+  const total = capitalCuota + interesCuota;
+  if (total <= 0) return { capital: 0, interes: 0 };
+  const capital = Math.round((montoAplicado * capitalCuota) / total);
+  return { capital, interes: montoAplicado - capital };
+}
+
+export interface ExigibleCalculado {
+  saldoAnteriorCentimos: number;
+  cuotaMesCentimos: number;
+  exigibleCentimos: number;
+  atrasadoNoAcumuladoCentimos: number;
+}
+
+/**
+ * Cálculo puro de lo exigible: en estricto se suma el arrastre al mes; en
+ * flexible solo cuenta la cuota del mes y lo atrasado se informa aparte.
+ */
+export function calcularExigible(
+  prestamo: Prestamo,
+  cuotas: CuotaPrestamo[],
+  pagadoPorCuota: (cuotaId: string) => number,
+  periodo: string,
+): ExigibleCalculado {
+  const fin = finDeMes(periodo);
+  let saldoAnterior = 0;
+  let cuotaMes = 0;
+
+  for (const cuota of cuotas) {
+    const saldo = Math.max(
+      0,
+      cuota.montoProgramadoCentimos - pagadoPorCuota(cuota.id),
+    );
+    if (saldo <= 0) continue;
+    if (cuota.fechaVencimiento < periodo) {
+      saldoAnterior += saldo;
+    } else if (cuota.fechaVencimiento <= fin) {
+      cuotaMes += saldo;
+    }
+  }
+
+  return {
+    saldoAnteriorCentimos: saldoAnterior,
+    cuotaMesCentimos: cuotaMes,
+    exigibleCentimos: prestamo.estrictoCumplimiento
+      ? saldoAnterior + cuotaMes
+      : cuotaMes,
+    atrasadoNoAcumuladoCentimos: prestamo.estrictoCumplimiento
+      ? 0
+      : saldoAnterior,
+  };
+}
+
+export interface ResumenPrestamo {
+  prestamoId: string;
+  capitalCentimos: number;
+  totalProgramadoCentimos: number;
+  totalCobradoCentimos: number;
+  capitalRecuperadoCentimos: number;
+  interesCobradoCentimos: number;
+  saldoPendienteCentimos: number;
+  saldoVencidoCentimos: number;
+  diasMaxAtraso: number;
+  resultadoCentimos: number;
+  perdidaNetaCentimos: number;
+  marca: 'EN_RIESGO' | 'EN_PERDIDA' | null;
+}
+
+/** Cálculo puro del resumen de un préstamo y sus marcas de riesgo. */
+export function calcularResumenPrestamo(
+  prestamo: Prestamo,
+  cuotas: CuotaPrestamo[],
+  aplicacionesDeCuota: (cuotaId: string) => AplicacionPago[],
+  hoy: string,
+  umbralRiesgo: number,
+): ResumenPrestamo {
+  let totalProgramado = 0;
+  let totalCobrado = 0;
+  let saldoPendiente = 0;
+  let saldoVencido = 0;
+  let diasMaxAtraso = 0;
+  let capitalRecuperado = 0;
+  let interesCobrado = 0;
+
+  for (const cuota of cuotas) {
+    totalProgramado += cuota.montoProgramadoCentimos;
+    const aplicaciones = aplicacionesDeCuota(cuota.id);
+    const pagado = aplicaciones.reduce(
+      (total, a) => total + a.montoAplicadoCentimos,
+      0,
+    );
+    const saldo = Math.max(0, cuota.montoProgramadoCentimos - pagado);
+    totalCobrado += pagado;
+    saldoPendiente += saldo;
+    capitalRecuperado += aplicaciones.reduce(
+      (total, a) => total + (a.montoCapitalCentimos ?? 0),
+      0,
+    );
+    interesCobrado += aplicaciones.reduce(
+      (total, a) => total + (a.montoInteresCentimos ?? 0),
+      0,
+    );
+    if (saldo > 0 && cuota.fechaVencimiento < hoy) {
+      saldoVencido += saldo;
+      diasMaxAtraso = Math.max(
+        diasMaxAtraso,
+        diasEntre(cuota.fechaVencimiento, hoy),
+      );
+    }
+  }
+
+  const perdidaNeta =
+    prestamo.estado === 'INCOBRABLE'
+      ? Math.max(0, prestamo.capitalCentimos - totalCobrado)
+      : 0;
+
+  const marca: ResumenPrestamo['marca'] =
+    prestamo.estado === 'INCOBRABLE'
+      ? 'EN_PERDIDA'
+      : prestamo.estado === 'ACTIVO' &&
+          saldoVencido > 0 &&
+          diasMaxAtraso > umbralRiesgo
+        ? 'EN_RIESGO'
+        : null;
+
+  return {
+    prestamoId: prestamo.id,
+    capitalCentimos: prestamo.capitalCentimos,
+    totalProgramadoCentimos: totalProgramado,
+    totalCobradoCentimos: totalCobrado,
+    capitalRecuperadoCentimos: capitalRecuperado,
+    interesCobradoCentimos: interesCobrado,
+    saldoPendienteCentimos: saldoPendiente,
+    saldoVencidoCentimos: saldoVencido,
+    diasMaxAtraso,
+    resultadoCentimos: totalCobrado - prestamo.capitalCentimos,
+    perdidaNetaCentimos: perdidaNeta,
+    marca,
   };
 }
