@@ -3,11 +3,17 @@ import type { BaseDatos } from '../db/baseDatos';
 import {
   calcularRecordatorios,
   ejecutarRecordatorios,
+} from '../aplicacion/notificaciones';
+import type {
+  AvisoNotificacion,
+  EstadoPermiso,
+  Notificador,
+} from '../aplicacion/puertos/notificador';
+import {
   notificacionesSoportadas,
   permisoNotificaciones,
   solicitarPermisoNotificaciones,
-  type Recordatorio,
-} from '../aplicacion/notificaciones';
+} from '../infraestructura/notificaciones/navegador';
 import { agregarMiembro } from '../aplicacion/miembros';
 import { registrarPersona } from '../aplicacion/personas';
 import { crearPrestamo } from '../aplicacion/prestamos';
@@ -18,6 +24,18 @@ import { baseTemporal, destruirBase } from './util';
 let db: BaseDatos;
 
 const HOY = '2026-11-25';
+
+function crearNotificador(estado: EstadoPermiso = 'granted') {
+  const mostrados: AvisoNotificacion[] = [];
+  const notificador: Notificador = {
+    permiso: () => estado,
+    solicitarPermiso: async () => estado,
+    mostrar: async (aviso) => {
+      mostrados.push(aviso);
+    },
+  };
+  return { notificador, mostrados };
+}
 
 beforeEach(async () => {
   db = await baseTemporal();
@@ -141,7 +159,7 @@ describe('Recordatorios de pago', () => {
     expect(deSuscripcion[0]?.cuerpo).toContain('Zapata Yamo, Nayeli');
 
     const dePrestamo = recordatorios.find((r) => r.tipo === 'PRESTAMO')!;
-    expect(dePrestamo.cuerpo).toContain('cuota 1/3');
+    expect(dePrestamo.cuerpo).toContain('Cuota 1/3');
   });
 
   it('avisa el día de facturación cuando el periodo aún no tiene cargos', async () => {
@@ -177,21 +195,15 @@ describe('Recordatorios de pago', () => {
       valor: 'SI',
     });
     await db.configuracion.put({ clave: 'recordatorios_dias', valor: '3' });
-    const mostrados: Recordatorio[] = [];
+    const { notificador, mostrados } = crearNotificador();
 
     const primera = await ejecutarRecordatorios(db, {
       hoy: HOY,
-      permiso: 'granted',
-      mostrar: async (recordatorio) => {
-        mostrados.push(recordatorio);
-      },
+      notificador,
     });
     const segunda = await ejecutarRecordatorios(db, {
       hoy: HOY,
-      permiso: 'granted',
-      mostrar: async (recordatorio) => {
-        mostrados.push(recordatorio);
-      },
+      notificador,
     });
 
     expect(primera.enviados).toBe(4);
@@ -207,10 +219,7 @@ describe('Recordatorios de pago', () => {
 
     const desactivado = await ejecutarRecordatorios(db, {
       hoy: HOY,
-      permiso: 'granted',
-      mostrar: async () => {
-        throw new Error('no debería mostrarse');
-      },
+      notificador: crearNotificador().notificador,
     });
     expect(desactivado.motivo).toBe('desactivadas');
     expect(desactivado.enviados).toBe(0);
@@ -221,19 +230,13 @@ describe('Recordatorios de pago', () => {
     });
     const sinPermiso = await ejecutarRecordatorios(db, {
       hoy: HOY,
-      permiso: 'default',
-      mostrar: async () => {
-        throw new Error('no debería mostrarse');
-      },
+      notificador: crearNotificador('default').notificador,
     });
     expect(sinPermiso.motivo).toBe('sin_permiso');
 
     const noSoportado = await ejecutarRecordatorios(db, {
       hoy: HOY,
-      permiso: 'no_soportado',
-      mostrar: async () => {
-        throw new Error('no debería mostrarse');
-      },
+      notificador: crearNotificador('no_soportado').notificador,
     });
     expect(noSoportado.motivo).toBe('no_soportado');
     expect(await db.recordatorios.count()).toBe(0);
@@ -247,32 +250,29 @@ describe('Recordatorios de pago', () => {
       valor: 'SI',
     });
     await db.configuracion.put({ clave: 'recordatorios_dias', valor: '3' });
-    const mostrados: Recordatorio[] = [];
-    const mostrar = async (r: Recordatorio) => {
-      mostrados.push(r);
-    };
+    const { notificador, mostrados } = crearNotificador();
 
     const aviso = await ejecutarRecordatorios(db, {
       hoy: '2026-11-24',
-      permiso: 'granted',
-      mostrar,
+      notificador,
     });
     const hoy = await ejecutarRecordatorios(db, {
       hoy: '2026-11-26',
-      permiso: 'granted',
-      mostrar,
+      notificador,
     });
     const repetido = await ejecutarRecordatorios(db, {
       hoy: '2026-11-26',
-      permiso: 'granted',
-      mostrar,
+      notificador,
     });
 
     expect(aviso.enviados).toBe(1);
     expect(aviso.motivo).toBeUndefined();
     expect(hoy.enviados).toBe(1);
     expect(repetido.enviados).toBe(0);
-    expect(mostrados.map((r) => r.momento)).toEqual(['AVISO', 'HOY']);
+    expect(mostrados.map((avisoMostrado) => avisoMostrado.titulo)).toEqual([
+      'Cobro próximo: YouTube Premium',
+      'Cobro de suscripción hoy: YouTube Premium',
+    ]);
   });
 
   it('maneja un entorno sin soporte de notificaciones', async () => {

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { db } from '../db/baseDatos';
 import { ejecutarRecordatorios } from '../aplicacion/notificaciones';
+import { notificadorNavegador } from '../infraestructura/notificaciones/navegador';
 
 let revisionEnCurso = false;
 
@@ -8,7 +9,9 @@ async function revisarRecordatorios(): Promise<void> {
   if (revisionEnCurso) return;
   revisionEnCurso = true;
   try {
-    await ejecutarRecordatorios(db);
+    await ejecutarRecordatorios(db, {
+      notificador: notificadorNavegador,
+    });
   } catch (error) {
     console.warn('No se pudieron revisar los recordatorios', error);
   } finally {

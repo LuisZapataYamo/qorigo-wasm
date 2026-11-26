@@ -15,12 +15,14 @@ import {
   desactivarRecordatorios,
   ejecutarRecordatorios,
   guardarDiasRecordatorio,
-  mostrarNotificacionNavegador,
-  notificacionesSoportadas,
-  permisoNotificaciones,
   recordatorioDePrueba,
   type EstadoPermiso,
 } from '../../aplicacion/notificaciones';
+import {
+  notificacionesSoportadas,
+  notificadorNavegador,
+  permisoNotificaciones,
+} from '../../infraestructura/notificaciones/navegador';
 import { mensajeDeError } from '../../dominio/errores';
 import { formatearFecha } from '../../dominio/fechas';
 import { nombreCompleto } from '../../dominio/nombres';
@@ -150,10 +152,16 @@ export function Configuracion() {
     setErrorNotif(null);
     setMensajeNotif(null);
     try {
-      const estado = await activarRecordatorios(db, diasRecordatorio);
+      const estado = await activarRecordatorios(
+        db,
+        notificadorNavegador,
+        diasRecordatorio,
+      );
       setPermiso(estado);
       if (estado === 'granted') {
-        const resultado = await ejecutarRecordatorios(db, { permiso: estado });
+        const resultado = await ejecutarRecordatorios(db, {
+          notificador: notificadorNavegador,
+        });
         setMensajeNotif(
           resultado.enviados > 0
             ? `Recordatorios activados. Se enviaron ${resultado.enviados} aviso(s).`
@@ -203,7 +211,12 @@ export function Configuracion() {
         setErrorNotif('Primero activa los recordatorios y concede el permiso.');
         return;
       }
-      await mostrarNotificacionNavegador(recordatorioDePrueba());
+      const prueba = recordatorioDePrueba();
+      await notificadorNavegador.mostrar({
+        clave: prueba.clave,
+        titulo: prueba.titulo,
+        cuerpo: prueba.cuerpo,
+      });
       setMensajeNotif('Notificación de prueba enviada.');
     } catch (fallo) {
       setErrorNotif(mensajeDeError(fallo));
